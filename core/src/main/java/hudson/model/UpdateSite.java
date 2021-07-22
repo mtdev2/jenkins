@@ -32,11 +32,14 @@ import hudson.Util;
 import hudson.lifecycle.Lifecycle;
 import hudson.model.UpdateCenter.UpdateCenterJob;
 import hudson.util.FormValidation;
-import hudson.util.FormValidation.Kind;
 import hudson.util.HttpResponses;
-import static jenkins.util.MemoryReductionUtil.*;
+import static jenkins.util.MemoryReductionUtil.EMPTY_STRING_ARRAY;
+import static jenkins.util.MemoryReductionUtil.getPresizedMutableMap;
+import static jenkins.util.MemoryReductionUtil.internInPlace;
 import hudson.util.TextFile;
-import static java.util.concurrent.TimeUnit.*;
+import static java.util.concurrent.TimeUnit.DAYS;
+import static java.util.concurrent.TimeUnit.HOURS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import hudson.util.VersionNumber;
 import java.io.File;
 import java.io.IOException;
@@ -234,8 +237,8 @@ public class UpdateSite {
         }
 
         if (signatureCheck) {
-            FormValidation e = verifySignature(o);
-            if (e.kind!=Kind.OK) {
+            FormValidation e = verifySignatureInternal(o);
+            if (e.kind!=FormValidation.Kind.OK) {
                 LOGGER.severe(e.toString());
                 return e;
             }
@@ -249,7 +252,7 @@ public class UpdateSite {
     }
 
     public FormValidation doVerifySignature() throws IOException {
-        return verifySignature(getJSONObject());
+        return verifySignatureInternal(getJSONObject());
     }
 
     /**
@@ -269,7 +272,8 @@ public class UpdateSite {
     /**
      * Verifies the signature in the update center data file.
      */
-    private FormValidation verifySignature(JSONObject o) throws IOException {
+    @Restricted(NoExternalUse.class)
+    public final FormValidation verifySignatureInternal(JSONObject o) throws IOException {
         return getJsonSignatureValidator().verifySignature(o);
     }
 
@@ -1046,8 +1050,8 @@ public class UpdateSite {
             return null;
     }
 
-    static final Predicate<Object> IS_DEP_PREDICATE = x -> x instanceof JSONObject && get(((JSONObject)x), "name") != null;
-    static final Predicate<Object> IS_NOT_OPTIONAL = x-> "false".equals(get(((JSONObject)x), "optional"));
+    static final Predicate<Object> IS_DEP_PREDICATE = x -> x instanceof JSONObject && get((JSONObject) x, "name") != null;
+    static final Predicate<Object> IS_NOT_OPTIONAL = x -> "false".equals(get((JSONObject) x, "optional"));
 
     public final class Plugin extends Entry {
         /**
@@ -1165,8 +1169,8 @@ public class UpdateSite {
             this.releaseTimestamp = date;
             this.categories = o.has("labels") ? internInPlace((String[])o.getJSONArray("labels").toArray(EMPTY_STRING_ARRAY)) : null;
             JSONArray ja = o.getJSONArray("dependencies");
-            int depCount = (int)(ja.stream().filter(IS_DEP_PREDICATE.and(IS_NOT_OPTIONAL)).count());
-            int optionalDepCount = (int)(ja.stream().filter(IS_DEP_PREDICATE.and(IS_NOT_OPTIONAL.negate())).count());
+            int depCount = (int)ja.stream().filter(IS_DEP_PREDICATE.and(IS_NOT_OPTIONAL)).count();
+            int optionalDepCount = (int)ja.stream().filter(IS_DEP_PREDICATE.and(IS_NOT_OPTIONAL.negate())).count();
             dependencies = getPresizedMutableMap(depCount);
             optionalDependencies = getPresizedMutableMap(optionalDepCount);
 

@@ -28,14 +28,32 @@ package jenkins.model;
 
 import antlr.ANTLRException;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import com.google.inject.Inject;
 import com.google.inject.Injector;
 import com.thoughtworks.xstream.XStream;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import hudson.*;
+import hudson.BulkChange;
+import hudson.DescriptorExtensionList;
+import hudson.Extension;
+import hudson.ExtensionComponent;
+import hudson.ExtensionFinder;
+import hudson.ExtensionList;
+import hudson.ExtensionPoint;
+import hudson.FilePath;
+import hudson.Functions;
+import hudson.Launcher;
 import hudson.Launcher.LocalLauncher;
+import hudson.Lookup;
+import hudson.Main;
+import hudson.Plugin;
+import hudson.PluginManager;
+import hudson.PluginWrapper;
+import hudson.ProxyConfiguration;
+import hudson.RestrictedSince;
+import hudson.TcpSlaveAgentListener;
+import hudson.Util;
+import hudson.WebAppMain;
+import hudson.XmlFile;
 import hudson.security.csrf.GlobalCrumbIssuerConfiguration;
 import jenkins.AgentProtocol;
 import jenkins.diagnostics.URICheckEncodingMonitor;
@@ -268,7 +286,6 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringTokenizer;
@@ -290,12 +307,22 @@ import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
-import static hudson.Util.*;
-import static hudson.init.InitMilestone.*;
+import static hudson.Util.fixEmpty;
+import static hudson.Util.fixNull;
+import static hudson.init.InitMilestone.COMPLETED;
+import static hudson.init.InitMilestone.EXTENSIONS_AUGMENTED;
+import static hudson.init.InitMilestone.JOB_CONFIG_ADAPTED;
+import static hudson.init.InitMilestone.JOB_LOADED;
+import static hudson.init.InitMilestone.PLUGINS_PREPARED;
+import static hudson.init.InitMilestone.SYSTEM_CONFIG_LOADED;
 import hudson.init.Initializer;
 import hudson.util.LogTaskListener;
-import static java.util.logging.Level.*;
-import static javax.servlet.http.HttpServletResponse.*;
+import static java.util.logging.Level.FINE;
+import static java.util.logging.Level.INFO;
+import static java.util.logging.Level.SEVERE;
+import static java.util.logging.Level.WARNING;
+import static javax.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static javax.servlet.http.HttpServletResponse.SC_NOT_FOUND;
 import org.kohsuke.accmod.restrictions.DoNotUse;
 import org.kohsuke.stapler.WebMethod;
 import org.springframework.security.access.AccessDeniedException;
@@ -352,7 +379,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     private transient SetupWizard setupWizard;
 
     /**
-     * Number of executors of the master node.
+     * Number of executors of the built-in node.
      */
     private int numExecutors = 2;
 
@@ -567,8 +594,11 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     private volatile String primaryView;
 
     private final transient ViewGroupMixIn viewGroupMixIn = new ViewGroupMixIn(this) {
+        @Override
         protected List<View> views() { return views; }
+        @Override
         protected String primaryView() { return primaryView; }
+        @Override
         protected void primaryView(String name) { primaryView=name; }
     };
 
@@ -703,7 +733,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     private final transient List<Action> actions = new CopyOnWriteArrayList<>();
 
     /**
-     * List of master node properties
+     * List of built-in node-specific node properties
      */
     private DescribableList<NodeProperty<?>,NodePropertyDescriptor> nodeProperties = new DescribableList<>(this);
 
@@ -755,6 +785,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     }
 
     static JenkinsHolder HOLDER = new JenkinsHolder() {
+        @Override
         public @CheckForNull Jenkins getInstance() {
             return theInstance;
         }
@@ -790,11 +821,11 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * {@link #get} is what you normally want.
      * <p>In certain rare cases you may have code that is intended to run before Jenkins starts or while Jenkins is being shut down.
      * For those rare cases use this method.
-     * <p>In other cases you may have code that might end up running on a remote JVM and not on the Jenkins master.
+     * <p>In other cases you may have code that might end up running on a remote JVM and not on the Jenkins controller or built-in node.
      * For those cases you really should rewrite your code so that when the {@link Callable} is sent over the remoting channel
      * it can do whatever it needs without ever referring to {@link Jenkins};
-     * for example, gather any information you need on the master side before constructing the callable.
-     * If you must do a runtime check whether you are in the master or agent, use {@link JenkinsJVM} rather than this method,
+     * for example, gather any information you need on the controller side before constructing the callable.
+     * If you must do a runtime check whether you are in the controller or agent, use {@link JenkinsJVM} rather than this method,
      * as merely loading the {@link Jenkins} class file into an agent JVM can cause linkage errors under some conditions.
      * @return The instance. Null if the {@link Jenkins} service has not been started, or was already shut down,
      *         or we are running on an unrelated JVM, typically an agent.
@@ -991,7 +1022,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
 
             updateComputerList();
 
-            {// master is online now, it's instance must always exist
+            {// built-in node is online now, its instance must always exist
                 final Computer c = toComputer();
                 if(c != null) {
                     for (ComputerListener cl : ComputerListener.all()) {
@@ -1030,7 +1061,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     /**
      * Maintains backwards compatibility. Invoked by XStream when this object is de-serialized.
      */
-    @SuppressWarnings({"unused"})
+    @SuppressWarnings("unused")
     protected Object readResolve() {
         if (jdks == null) {
             jdks = new ArrayList<>();
@@ -1259,10 +1290,10 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
                 //    at all when they save their config as the protocol is now opt-out. Any admins that want to
                 //    disable it can do so and will have their preference recorded.
                 // 3. We decide that the protocol needs to be retired. It gets switched back to opt-in. At this point
-                //    the initial opt-in admins, assuming they visited an upgrade to a master with step 2, will
-                //    have the protocol disabled for them. This is what we want. If they didn't upgrade to a master
+                //    the initial opt-in admins, assuming they visited an upgrade to a controller with step 2, will
+                //    have the protocol disabled for them. This is what we want. If they didn't upgrade to a controller
                 //    with step 2, well there is not much we can do to differentiate them from somebody who is upgrading
-                //    from a previous step 3 master and had needed to keep the protocol turned on.
+                //    from a previous step 3 controller and had needed to keep the protocol turned on.
                 //
                 // What we should never do is flip-flop: opt-in -> opt-out -> opt-in -> opt-out as that will basically
                 // clear any preference that an admin has set, but this should be ok as we only ever will be
@@ -1347,10 +1378,12 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         }
     }
 
+    @Override
     public void setNodeName(String name) {
         throw new UnsupportedOperationException(); // not allowed
     }
 
+    @Override
     public String getNodeDescription() {
         return Messages.Hudson_NodeDescription();
     }
@@ -1515,7 +1548,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * Gets the {@link JobPropertyDescriptor} by name. Primarily used for making them web-visible.
      */
     public JobPropertyDescriptor getJobProperty(String shortClassName) {
-        // combining these two lines triggers javac bug. See issue #610.
+        // combining these two lines triggers javac bug. See issue JENKINS-610
         Descriptor d = findDescriptor(shortClassName, JobPropertyDescriptor.all());
         return (JobPropertyDescriptor) d;
     }
@@ -1539,7 +1572,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      *      Either {@link Descriptor#getId()} (recommended) or the short name of a {@link Describable} subtype (for compatibility)
      * @throws IllegalArgumentException if a short name was passed which matches multiple IDs (fail fast)
      */
-    @SuppressWarnings({"rawtypes"}) // too late to fix
+    @SuppressWarnings("rawtypes") // too late to fix
     public Descriptor getDescriptor(String id) {
         // legacy descriptors that are registered manually doesn't show up in getExtensionList, so check them explicitly.
         Iterable<Descriptor> descriptors = Iterators.sequence(getExtensionList(Descriptor.class), DescriptorExtensionList.listLegacyInstances());
@@ -1627,6 +1660,10 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
                 return d;
         }
         return null;
+    }
+
+    protected void updateNewComputer(Node n) {
+        updateNewComputer(n, AUTOMATIC_SLAVE_LAUNCH);
     }
 
     protected void updateComputerList() {
@@ -1741,15 +1778,18 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return FederatedLoginService.all();
     }
 
+    @Override
     public Launcher createLauncher(TaskListener listener) {
         return new LocalLauncher(listener).decorateFor(this);
     }
 
 
+    @Override
     public String getFullName() {
         return "";
     }
 
+    @Override
     public String getFullDisplayName() {
         return "";
     }
@@ -1779,6 +1819,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      *
      * @see #getAllItems(Class)
      */
+    @Override
     @Exported(name="jobs")
     public List<TopLevelItem> getItems() {
         return getItems(t -> true);
@@ -1868,6 +1909,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * @param name Name of the view
      * @return View instance or {@code null} if it is missing
      */
+    @Override
     @CheckForNull
     public View getView(@CheckForNull String name) {
         return viewGroupMixIn.getView(name);
@@ -1876,6 +1918,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     /**
      * Gets the read-only list of all {@link View}s.
      */
+    @Override
     @Exported
     public Collection<View> getViews() {
         return viewGroupMixIn.getViews();
@@ -1906,14 +1949,17 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         }
     }
 
+    @Override
     public boolean canDelete(View view) {
         return viewGroupMixIn.canDelete(view);
     }
 
+    @Override
     public synchronized void deleteView(View view) throws IOException {
         viewGroupMixIn.deleteView(view);
     }
 
+    @Override
     public void onViewRenamed(View view, String oldName, String newName) {
         viewGroupMixIn.onViewRenamed(view, oldName, newName);
     }
@@ -1931,6 +1977,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         this.primaryView = v.getViewName();
     }
 
+    @Override
     public ViewsTabBar getViewsTabBar() {
         return viewsTabBar;
     }
@@ -2068,6 +2115,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return r;
     }
 
+    @Override
     public Queue getQueue() {
         return queue;
     }
@@ -2125,6 +2173,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return clouds.getByName(name);
     }
 
+    @Override
     protected Map<Node,Computer> getComputerMap() {
         return computers;
     }
@@ -2133,6 +2182,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * Returns all {@link Node}s in the system, excluding {@link Jenkins} instance itself which
      * represents the master.
      */
+    @Override
     @NonNull
     public List<Node> getNodes() {
         return nodes.getNodes();
@@ -2181,6 +2231,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         nodes.setNodes(n);
     }
 
+    @Override
     public DescribableList<NodeProperty<?>, NodePropertyDescriptor> getNodeProperties() {
         return nodeProperties;
     }
@@ -2196,11 +2247,15 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * but we also call this periodically to self-heal any data out-of-sync issue.
      */
     /*package*/ void trimLabels() {
+        Set<Label> nodeLabels = new HashSet<>(this.getAssignedLabels());
+        this.getNodes().forEach(n -> nodeLabels.addAll(n.getAssignedLabels()));
         for (Iterator<Label> itr = labels.values().iterator(); itr.hasNext();) {
             Label l = itr.next();
-            resetLabel(l);
-            if(l.isEmpty())
+            if (nodeLabels.contains(l) || this.clouds.stream().anyMatch(c -> c.canProvision(l))) {
+                resetLabel(l);
+            } else {
                 itr.remove();
+            }
         }
     }
 
@@ -2236,6 +2291,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         }).collect(Collectors.toList());
     }
 
+    @Override
     public NodeDescriptor getDescriptor() {
         return DescriptorImpl.INSTANCE;
     }
@@ -2303,7 +2359,9 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
                     .add("log");
         }
         builder.add(new CollectionSearchIndex<TopLevelItem>() {
+                    @Override
                     protected SearchItem get(String key) { return getItemByFullName(key, TopLevelItem.class); }
+                    @Override
                     protected Collection<TopLevelItem> all() { return getAllItems(TopLevelItem.class); }
                     @NonNull
                     @Override
@@ -2313,20 +2371,27 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
                 })
                 .add(getPrimaryView().makeSearchIndex())
                 .add(new CollectionSearchIndex() {// for computers
+                    @Override
                     protected Computer get(String key) { return getComputer(key); }
+                    @Override
                     protected Collection<Computer> all() { return computers.values(); }
                 })
                 .add(new CollectionSearchIndex() {// for users
+                    @Override
                     protected User get(String key) { return User.get(key,false); }
+                    @Override
                     protected Collection<User> all() { return User.getAll(); }
                 })
                 .add(new CollectionSearchIndex() {// for views
+                    @Override
                     protected View get(String key) { return getView(key); }
+                    @Override
                     protected Collection<View> all() { return getAllViews(); }
                 });
         return builder;
     }
 
+    @Override
     public String getUrlChildPrefix() {
         return "job";
     }
@@ -2465,10 +2530,12 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return defaultValue;
     }
 
+    @Override
     public File getRootDir() {
         return root;
     }
 
+    @Override
     public FilePath getWorkspaceFor(TopLevelItem item) {
         for (WorkspaceLocator l : WorkspaceLocator.all()) {
             FilePath workspace = l.locate(item, this);
@@ -2505,11 +2572,12 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
 
     @Restricted(NoExternalUse.class)
     public static String expandVariablesForDirectory(String base, String itemFullName, String itemRootDir) {
-        return Util.replaceMacro(base, ImmutableMap.of(
-                "JENKINS_HOME", Jenkins.get().getRootDir().getPath(),
-                "ITEM_ROOTDIR", itemRootDir,
-                "ITEM_FULLNAME", itemFullName,   // legacy, deprecated
-                "ITEM_FULL_NAME", itemFullName.replace(':','$'))); // safe, see JENKINS-12251
+        Map<String, String> properties = new HashMap<>();
+        properties.put("JENKINS_HOME", Jenkins.get().getRootDir().getPath());
+        properties.put("ITEM_ROOTDIR", itemRootDir);
+        properties.put("ITEM_FULLNAME", itemFullName); // legacy, deprecated
+        properties.put("ITEM_FULL_NAME", itemFullName.replace(':','$')); // safe, see JENKINS-12251
+        return Util.replaceMacro(base, Collections.unmodifiableMap(properties));
 
     }
 
@@ -2570,7 +2638,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     }
 
     public boolean isUseProjectNamingStrategy(){
-        return projectNamingStrategy != DefaultProjectNamingStrategy.DEFAULT_NAMING_STRATEGY;
+        return projectNamingStrategy != ProjectNamingStrategy.DEFAULT_NAMING_STRATEGY;
     }
 
     /**
@@ -2621,7 +2689,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         try {
             HudsonFilter filter = HudsonFilter.get(servletContext);
             if (filter == null) {
-                // Fix for #3069: This filter is not necessarily initialized before the servlets.
+                // Fix for JENKINS-3069: This filter is not necessarily initialized before the servlets.
                 // when HudsonFilter does come back, it'll initialize itself.
                 LOGGER.fine("HudsonFilter has not yet been initialized: Can't perform security setup for now");
             } else {
@@ -2668,7 +2736,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
 
     public void setProjectNamingStrategy(ProjectNamingStrategy ns) {
         if(ns == null){
-            ns = DefaultProjectNamingStrategy.DEFAULT_NAMING_STRATEGY;
+            ns = ProjectNamingStrategy.DEFAULT_NAMING_STRATEGY;
         }
         projectNamingStrategy = ns;
     }
@@ -2697,7 +2765,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      *      Can be an empty list but never null.
      * @see ExtensionList#lookup
      */
-    @SuppressWarnings({"unchecked"})
+    @SuppressWarnings("unchecked")
     public <T> ExtensionList<T> getExtensionList(Class<T> extensionType) {
         ExtensionList<T> extensionList = extensionLists.get(extensionType);
         return extensionList != null ? extensionList : extensionLists.computeIfAbsent(extensionType, key -> ExtensionList.create(this, key));
@@ -2720,7 +2788,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * @return
      *      Can be an empty list but never null.
      */
-    @SuppressWarnings({"unchecked"})
+    @SuppressWarnings("unchecked")
     public @NonNull <T extends Describable<T>,D extends Descriptor<T>> DescriptorExtensionList<T,D> getDescriptorList(Class<T> type) {
         return descriptorLists.computeIfAbsent(type, key -> DescriptorExtensionList.createDescriptorList(this, key));
     }
@@ -2948,6 +3016,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return getItem(pathName,context!=null?context.getParent():null,type);
     }
 
+    @Override
     public File getRootDirFor(TopLevelItem child) {
         return getRootDirFor(child.getName());
     }
@@ -3010,6 +3079,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return createProject(type, name, true);
     }
 
+    @Override
     public synchronized TopLevelItem createProject( TopLevelItemDescriptor type, String name, boolean notify ) throws IOException {
         return itemGroupMixIn.createProject(type,name,notify);
     }
@@ -3062,6 +3132,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     /**
      * Called in response to {@link Job#doDoDelete(StaplerRequest, StaplerResponse)}
      */
+    @Override
     public void onDeleted(TopLevelItem item) throws IOException {
         ItemListener.fireOnDeleted(item);
 
@@ -3114,10 +3185,12 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return new XmlFile(XSTREAM, new File(root,"config.xml"));
     }
 
+    @Override
     public int getNumExecutors() {
         return numExecutors;
     }
 
+    @Override
     public Mode getMode() {
         return mode;
     }
@@ -3127,6 +3200,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         save();
     }
 
+    @Override
     public String getLabelString() {
         return fixNull(label).trim();
     }
@@ -3257,6 +3331,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
 
         TaskGraphBuilder g = new TaskGraphBuilder();
         Handle loadJenkins = g.requires(EXTENSIONS_AUGMENTED).attains(SYSTEM_CONFIG_LOADED).add("Loading global config", new Executable() {
+            @Override
             public void run(Reactor session) throws Exception {
                 loadConfig();
                 // if we are loading old data that doesn't have this field
@@ -3274,6 +3349,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         List<Handle> loadJobs = new ArrayList<>();
         for (final File subdir : subdirs) {
             loadJobs.add(g.requires(loadJenkins).attains(JOB_LOADED).notFatal().add("Loading item " + subdir.getName(), new Executable() {
+                @Override
                 public void run(Reactor session) throws Exception {
                     if(!Items.getConfigFile(subdir).exists()) {
                         //Does not have job config file, so it is not a jenkins job hence skip it
@@ -3287,6 +3363,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         }
 
         g.requires(loadJobs.toArray(new Handle[0])).attains(JOB_LOADED).add("Cleaning up obsolete items deleted from the disk", new Executable() {
+            @Override
             public void run(Reactor reactor) throws Exception {
                 // anything we didn't load from disk, throw them away.
                 // doing this after loading from disk allows newly loaded items
@@ -3302,6 +3379,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         });
 
         g.requires(JOB_CONFIG_ADAPTED).attains(COMPLETED).add("Finalizing set up",new Executable() {
+            @Override
             public void run(Reactor session) throws Exception {
                 rebuildDependencyGraph();
 
@@ -3364,6 +3442,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     /**
      * Save the settings to a file.
      */
+    @Override
     public synchronized void save() throws IOException {
         InitMilestone currentMilestone = initLevel;
 
@@ -3685,7 +3764,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     private void _cleanUpPersistQueue(List<Throwable> errors) {
         if(getRootDir().exists()) {
             // if we are aborting because we failed to create JENKINS_HOME,
-            // don't try to save. Issue #536
+            // don't try to save. JENKINS-536
             LOGGER.log(Main.isUnitTest ? Level.FINE : Level.INFO, "Persisting build queue");
             try {
                 getQueue().save();
@@ -3968,7 +4047,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     }
 
     /**
-     * Obtains the thread dump of all agents (including the master.)
+     * Obtains the thread dump of all agents (including the controller/built-in node.)
      *
      * <p>
      * Since this is for diagnostics, it has a built-in precautionary measure against hang agents.
@@ -3995,7 +4074,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         long endTime = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(5);
 
         Map<String,Map<String,String>> r = new HashMap<>();
-        for (Entry<String, Future<Map<String, String>>> e : future.entrySet()) {
+        for (Map.Entry<String, Future<Map<String, String>>> e : future.entrySet()) {
             try {
                 r.put(e.getKey(), e.getValue().get(endTime-System.currentTimeMillis(), TimeUnit.MILLISECONDS));
             } catch (Exception x) {
@@ -4005,6 +4084,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return Collections.unmodifiableSortedMap(new TreeMap<>(r));
     }
 
+    @Override
     @RequirePOST
     public synchronized TopLevelItem doCreateItem( StaplerRequest req, StaplerResponse rsp ) throws IOException, ServletException {
         return itemGroupMixIn.createTopLevelItem(req, rsp);
@@ -4013,11 +4093,13 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     /**
      * @since 1.319
      */
+    @Override
     public TopLevelItem createProjectFromXML(String name, InputStream xml) throws IOException {
         return itemGroupMixIn.createProjectFromXML(name, xml);
     }
 
 
+    @Override
     public <T extends TopLevelItem> T copy(T src, String name) throws IOException {
         return itemGroupMixIn.copy(src, name);
     }
@@ -4235,6 +4317,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         throw new RuntimeException();
     }
 
+    @Override
     public ContextMenu doContextMenu(StaplerRequest request, StaplerResponse response) throws IOException, JellyException {
         ContextMenu menu = new ContextMenu().from(this, request, response);
         for (MenuItem i : menu.items) {
@@ -4246,6 +4329,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return menu;
     }
 
+    @Override
     public ContextMenu doChildrenContextMenu(StaplerRequest request, StaplerResponse response) throws Exception {
         ContextMenu menu = new ContextMenu();
         for (View view : getViews()) {
@@ -4598,7 +4682,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         if(qs==null)
             throw new ServletException();
         Cookie cookie = new Cookie("iconSize", Functions.validateIconSize(qs));
-        cookie.setMaxAge(/* ~4 mo. */9999999); // #762
+        cookie.setMaxAge(/* ~4 mo. */9999999); // JENKINS-762
         cookie.setSecure(req.isSecure());
         cookie.setHttpOnly(true);
         rsp.addCookie(cookie);
@@ -4828,6 +4912,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         return widgets;
     }
 
+    @Override
     public Object getTarget() {
         try {
             checkPermission(READ);
@@ -4861,7 +4946,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
         }
 
         // TODO SlaveComputer.doSlaveAgentJnlp; there should be an annotation to request unprotected access
-        if ((isAgentJnlpPath(restOfPath, "jenkins") || (isAgentJnlpPath(restOfPath, "slave")))
+        if ((isAgentJnlpPath(restOfPath, "jenkins") || isAgentJnlpPath(restOfPath, "slave"))
             && "true".equals(Stapler.getCurrentRequest().getParameter("encrypt"))) {
             return false;
         }
@@ -4897,6 +4982,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
     /**
      * Fallback to the primary view.
      */
+    @Override
     public View getStaplerFallback() {
         return getPrimaryView();
     }
@@ -4906,8 +4992,6 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      * unique. It does not check the displayName against the displayName of the
      * job that the user is configuring though to prevent a validation warning
      * if the user sets the displayName to what it currently is.
-     * @param displayName
-     * @param currentJobName
      */
     boolean isDisplayNameUnique(String displayName, String currentJobName) {
         Collection<TopLevelItem> itemCollection = items.values();
@@ -5008,6 +5092,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
             return "computer/(master)/";
         }
 
+        @Override
         public RetentionStrategy getRetentionStrategy() {
             return RetentionStrategy.NOOP;
         }
@@ -5066,10 +5151,12 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
             return Charset.defaultCharset();
         }
 
+        @Override
         public List<LogRecord> getLogRecords() throws IOException, InterruptedException {
             return logRecords;
         }
 
+        @Override
         @RequirePOST
         public void doLaunchSlaveAgent(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
             // this computer never returns null from channel, so
@@ -5077,6 +5164,7 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
             rsp.sendError(SC_NOT_FOUND);
         }
 
+        @Override
         protected Future<?> _connect(boolean forceReconnect) {
             return Futures.precomputed(null);
         }
@@ -5392,19 +5480,18 @@ public class Jenkins extends AbstractCIBase implements DirectlyModifiableTopLeve
      *
      * <p>See also:{@link #getUnprotectedRootActions}.
      */
-    private static final Set<String> ALWAYS_READABLE_PATHS = new HashSet<>(ImmutableSet.of(
-        "login",
-        "loginError",
-        "logout",
-        "accessDenied",
-        "adjuncts",
-        "error",
-        "oops",
-        "signup",
-        "tcpSlaveAgentListener",
-        "federatedLoginService",
-        "securityRealm",
-        "instance-identity"
+    private static final Set<String> ALWAYS_READABLE_PATHS = new HashSet<>(Arrays.asList(
+        "login", // .jelly
+        "loginError", // .jelly
+        "logout", // #doLogout
+        "accessDenied", // .jelly
+        "adjuncts", // #getAdjuncts
+        "error", // AbstractModelObject/error.jelly
+        "oops", // .jelly
+        "signup", // #doSignup
+        "tcpSlaveAgentListener", // #getTcpSlaveAgentListener
+        "federatedLoginService", // #getFederatedLoginService
+        "securityRealm" // #getSecurityRealm
     ));
 
     static {
