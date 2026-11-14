@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2010, Sun Microsystems, Inc., Kohsuke Kawaguchi
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,11 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
+
+import static java.util.logging.Level.FINE;
 
 import com.thoughtworks.xstream.XStreamException;
 import com.thoughtworks.xstream.converters.ConversionException;
 import com.thoughtworks.xstream.converters.Converter;
+import com.thoughtworks.xstream.converters.ConverterLookup;
 import com.thoughtworks.xstream.converters.MarshallingContext;
 import com.thoughtworks.xstream.converters.SingleValueConverter;
 import com.thoughtworks.xstream.converters.UnmarshallingContext;
@@ -35,13 +39,24 @@ import com.thoughtworks.xstream.converters.reflection.ReflectionConverter;
 import com.thoughtworks.xstream.converters.reflection.ReflectionProvider;
 import com.thoughtworks.xstream.core.util.Primitives;
 import com.thoughtworks.xstream.core.util.SerializationMembers;
+import com.thoughtworks.xstream.io.ExtendedHierarchicalStreamWriterHelper;
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 import com.thoughtworks.xstream.mapper.Mapper;
+import com.thoughtworks.xstream.security.InputManipulationException;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.diagnosis.OldDataMonitor;
+import hudson.model.JobProperty;
+import hudson.model.PersistenceRoot;
 import hudson.model.Saveable;
+import hudson.remoting.ClassFilter;
+import hudson.security.ACL;
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -51,18 +66,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-import static java.util.logging.Level.FINE;
-
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import edu.umd.cs.findbugs.annotations.NonNull;
-import net.jcip.annotations.GuardedBy;
-
-import hudson.security.ACL;
 import jenkins.model.Jenkins;
 import jenkins.util.SystemProperties;
 import jenkins.util.xstream.CriticalXStreamException;
+import net.jcip.annotations.GuardedBy;
 import org.acegisecurity.Authentication;
+import org.jvnet.tiger_types.Types;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Custom {@link ReflectionConverter} that handle errors more gracefully.
@@ -78,8 +91,33 @@ import org.acegisecurity.Authentication;
 @SuppressWarnings({"rawtypes", "unchecked"})
 public class RobustReflectionConverter implements Converter {
 
-    private static /* non-final for Groovy */ boolean RECORD_FAILURES_FOR_ALL_AUTHENTICATIONS = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".recordFailuresForAllAuthentications", false);
+    static /* non-final for Groovy */ boolean DISABLE_XSTREAM_NOT_DESERIALIZABLE_CHECK = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".DISABLE_XSTREAM_NOT_DESERIALIZABLE_CHECK", false);
+    static /* non-final for Groovy */ boolean TRANSIENT_FIELD_STRICT_MODE = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".TRANSIENT_FIELD_STRICT_MODE", false);
+
+    static /* non-final for Groovy */ boolean SKIP_FIELD_VALUE_ELEMENT_TYPE_CHECK = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".skipFieldValueElementTypeCheck", false);
+    static /* non-final for Groovy */ boolean ACCEPT_NON_ITERABLE_COLLECTIONS = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".acceptNonIterableCollections", false);
+    static /* non-final for Groovy */ int FIELD_VALUE_ELEMENT_CHECK_LIMIT = SystemProperties.getInteger(RobustReflectionConverter.class.getName() + ".fieldValueElementCheckLimit", 1_000_000);
+    static /* non-final for Groovy */ int FIELD_VALUE_ELEMENT_CHECK_WARNING_THRESHOLD = SystemProperties.getInteger(RobustReflectionConverter.class.getName() + ".fieldValueElementCheckWarningThreshold", FIELD_VALUE_ELEMENT_CHECK_LIMIT / 5);
+    private static final String FIELD_VALUE_ELEMENTS_CHECKED = RobustReflectionConverter.class.getName() + ".fieldValueElementsChecked";
+
+    static /* non-final for Groovy */ boolean RECORD_FAILURES_FOR_ALL_AUTHENTICATIONS = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".recordFailuresForAllAuthentications", false);
     private static /* non-final for Groovy */ boolean RECORD_FAILURES_FOR_ADMINS = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".recordFailuresForAdmins", false);
+
+    static final Set<String> SAFE_TYPES_WITH_OBJECT_FIELDS = new HashSet<>();
+    static boolean ALLOW_ALL_OBJECT_FIELDS = SystemProperties.getBoolean(RobustReflectionConverter.class.getName() + ".ALLOW_ALL_OBJECT_FIELDS", false);
+
+    static {
+        final String classNames = SystemProperties.getString(RobustReflectionConverter.class.getName() + ".SAFE_TYPES_WITH_OBJECT_FIELDS");
+        if (classNames != null) {
+            for (String className : classNames.split(",")) {
+                SAFE_TYPES_WITH_OBJECT_FIELDS.add(className.trim());
+            }
+        }
+        // `ModelASTValue` is a known instance of a class with Object-type field (`value`) that gets deserialized from XML.
+        // It doesn't route requests to its `value` field, so this is not a problem.
+        // TODO Remove this compatibility hack once the plugin has been updated to be compatible
+        SAFE_TYPES_WITH_OBJECT_FIELDS.add("org.jenkinsci.plugins.pipeline.modeldefinition.ast.ModelASTValue");
+    }
 
     protected final ReflectionProvider reflectionProvider;
     protected final Mapper mapper;
@@ -94,10 +132,16 @@ public class RobustReflectionConverter implements Converter {
     private final ReadWriteLock criticalFieldsLock = new ReentrantReadWriteLock();
     @GuardedBy("criticalFieldsLock")
     private final Map<String, Set<String>> criticalFields = new HashMap<>();
+    private ConverterLookup converterLookup;
+
+    void setConverterLookup(ConverterLookup converterLookup) {
+        this.converterLookup = converterLookup;
+    }
 
     public RobustReflectionConverter(Mapper mapper, ReflectionProvider reflectionProvider) {
         this(mapper, reflectionProvider, new XStream2().new PluginClassOwnership());
     }
+
     RobustReflectionConverter(Mapper mapper, ReflectionProvider reflectionProvider, XStream2.ClassOwnership classOwnership) {
         this.mapper = mapper;
         this.reflectionProvider = reflectionProvider;
@@ -122,7 +166,7 @@ public class RobustReflectionConverter implements Converter {
             criticalFieldsLock.writeLock().unlock();
         }
     }
-    
+
     private boolean hasCriticalField(Class<?> clazz, String field) {
         // Lock the write lock
         criticalFieldsLock.readLock().lock();
@@ -141,10 +185,12 @@ public class RobustReflectionConverter implements Converter {
         }
     }
 
+    @Override
     public boolean canConvert(Class type) {
         return true;
     }
 
+    @Override
     public void marshal(Object original, final HierarchicalStreamWriter writer, final MarshallingContext context) {
         final Object source = serializationMethodInvoker.callWriteReplace(original);
 
@@ -171,6 +217,7 @@ public class RobustReflectionConverter implements Converter {
             }
             return c;
         }
+
         private void startVisiting(HierarchicalStreamWriter writer, String owner) {
             if (owner != null) {
                 boolean redundant = false;
@@ -186,37 +233,37 @@ public class RobustReflectionConverter implements Converter {
             }
             addFirst(owner);
         }
+
         private void stopVisiting() {
             removeFirst();
         }
     }
 
+    @SuppressWarnings("deprecation")
     protected void doMarshal(final Object source, final HierarchicalStreamWriter writer, final MarshallingContext context) {
         final Set seenFields = new HashSet();
         final Set seenAsAttributes = new HashSet();
 
         // Attributes might be preferred to child elements ...
-         reflectionProvider.visitSerializableFields(source, new ReflectionProvider.Visitor() {
-            @SuppressWarnings("deprecation") // deliberately calling deprecated methods?
-            @Override
-            public void visit(String fieldName, Class type, Class definedIn, Object value) {
-                SingleValueConverter converter = mapper.getConverterFromItemType(fieldName, type, definedIn);
-                if (converter == null) converter = mapper.getConverterFromItemType(fieldName, type);
-                if (converter == null) converter = mapper.getConverterFromItemType(type);
-                if (converter != null) {
-                    if (value != null) {
-                        final String str = converter.toString(value);
-                        if (str != null) {
-                            writer.addAttribute(mapper.aliasForAttribute(fieldName), str);
-                        }
+        // deliberately calling deprecated methods?
+        reflectionProvider.visitSerializableFields(source, (fieldName, type, definedIn, value) -> {
+            SingleValueConverter converter = mapper.getConverterFromItemType(fieldName, type, definedIn);
+            if (converter == null) converter = mapper.getConverterFromItemType(fieldName, type);
+            if (converter == null) converter = mapper.getConverterFromItemType(type);
+            if (converter != null) {
+                if (value != null) {
+                    final String str = converter.toString(value);
+                    if (str != null) {
+                        writer.addAttribute(mapper.aliasForAttribute(fieldName), str);
                     }
-                    seenAsAttributes.add(fieldName);
                 }
+                seenAsAttributes.add(fieldName);
             }
         });
 
         // Child elements not covered already processed as attributes ...
         reflectionProvider.visitSerializableFields(source, new ReflectionProvider.Visitor() {
+            @Override
             public void visit(String fieldName, Class fieldType, Class definedIn, Object newObj) {
                 if (!seenAsAttributes.contains(fieldName) && newObj != null) {
                     Mapper.ImplicitCollectionMapping mapping = mapper.getImplicitCollectionDefForFieldName(source.getClass(), fieldName);
@@ -242,7 +289,7 @@ public class RobustReflectionConverter implements Converter {
                     if (!mapper.shouldSerializeMember(definedIn, aliasName)) {
                         return;
                     }
-                    com.thoughtworks.xstream.io.ExtendedHierarchicalStreamWriterHelper.startNode(writer, mapper.serializedMember(definedIn, aliasName), fieldType);
+                    ExtendedHierarchicalStreamWriterHelper.startNode(writer, mapper.serializedMember(definedIn, aliasName), fieldType);
 
                     Class actualType = newObj.getClass();
 
@@ -258,12 +305,12 @@ public class RobustReflectionConverter implements Converter {
                         writer.addAttribute(mapper.aliasForAttribute("defined-in"), mapper.serializedClass(definedIn));
                     }
 
-                    Field field = reflectionProvider.getField(definedIn,fieldName);
+                    Field field = reflectionProvider.getField(definedIn, fieldName);
                     marshallField(context, newObj, field);
                     writer.endNode();
                 } catch (RuntimeException e) {
                     // intercept an exception so that the stack trace shows how we end up marshalling the object in question
-                    throw new RuntimeException("Failed to serialize "+definedIn.getName()+"#"+fieldName+" for "+source.getClass(),e);
+                    throw new RuntimeException("Failed to serialize " + definedIn.getName() + "#" + fieldName + " for " + source.getClass(), e);
                 }
             }
 
@@ -275,6 +322,7 @@ public class RobustReflectionConverter implements Converter {
         context.convertAnother(newObj, converter);
     }
 
+    @Override
     public Object unmarshal(final HierarchicalStreamReader reader, final UnmarshallingContext context) {
         Object result = instantiateNewInstance(reader, context);
         result = doUnmarshal(result, reader, context);
@@ -296,7 +344,7 @@ public class RobustReflectionConverter implements Converter {
             boolean fieldExistsInClass = fieldDefinedInClass(result, attrName);
             if (fieldExistsInClass) {
                 Field field = reflectionProvider.getField(result.getClass(), attrName);
-                SingleValueConverter converter = mapper.getConverterFromAttribute(field.getDeclaringClass(),attrName,field.getType());
+                SingleValueConverter converter = mapper.getConverterFromAttribute(field.getDeclaringClass(), attrName, field.getType());
                 Class type = field.getType();
                 if (converter == null) {
                     converter = mapper.getConverterFromItemType(type); // TODO add fieldName & definedIn args
@@ -315,7 +363,8 @@ public class RobustReflectionConverter implements Converter {
             }
         }
 
-        Map implicitCollectionsForCurrentObject = null;
+        Map<String, Collection<Object>> implicitCollectionsForCurrentObject = new HashMap<>();
+        Map<String, Class<?>> implicitCollectionElementTypesForCurrentObject = new HashMap<>();
         while (reader.hasMoreChildren()) {
             reader.moveDown();
 
@@ -332,13 +381,24 @@ public class RobustReflectionConverter implements Converter {
                 boolean implicitCollectionHasSameName = mapper.getImplicitCollectionDefForFieldName(result.getClass(), reader.getNodeName()) != null;
 
                 Class classDefiningField = determineWhichClassDefinesField(reader);
-                boolean fieldExistsInClass = !implicitCollectionHasSameName && fieldDefinedInClass(result,fieldName);
+                boolean fieldExistsInClass = !implicitCollectionHasSameName && fieldDefinedInClass(result, fieldName);
 
                 Class type = determineType(reader, fieldExistsInClass, result, fieldName, classDefiningField);
                 final Object value;
                 if (fieldExistsInClass) {
-                    Field field = reflectionProvider.getField(result.getClass(),fieldName);
+                    Field field = reflectionProvider.getField(classDefiningField != null ? classDefiningField : result.getClass(), fieldName);
+                    // JobProperty as a workaround for promoted-builds plugin's `JobPropertyImpl` being both
+                    if (PersistenceRoot.class.isAssignableFrom(type) && !JobProperty.class.isAssignableFrom(type) && !isSafePersistenceRootReference(reader, type)) {
+                        final String msg = "Refusing to unmarshal PersistenceRoot subtype '" + type.getName() + "' into field '"
+                                + fieldName + "' in '" + result.getClass().getName()
+                                + "'. PersistenceRoot objects are document roots and must not appear as nested field values.";
+                        LOGGER.log(Level.WARNING, msg);
+                        throw new CriticalXStreamException(new XStreamException(msg));
+                    }
                     value = unmarshalField(context, result, type, field);
+                    if (value != null) {
+                        checkFieldValueElementTypes(context, reader, field, value);
+                    }
                     // TODO the reflection provider should have returned the proper field in first place ....
                     Class definedType = reflectionProvider.getFieldType(result, fieldName, classDefiningField);
                     if (!definedType.isPrimitive()) {
@@ -356,11 +416,17 @@ public class RobustReflectionConverter implements Converter {
                         reflectionProvider.writeField(result, fieldName, value, classDefiningField);
                         seenFields.add(classDefiningField, fieldName);
                     } else {
-                        implicitCollectionsForCurrentObject = writeValueToImplicitCollection(context, value, implicitCollectionsForCurrentObject, result, fieldName);
+                        writeValueToImplicitCollection(reader, context, value, implicitCollectionsForCurrentObject, implicitCollectionElementTypesForCurrentObject, result, fieldName);
                     }
                 }
             } catch (CriticalXStreamException e) {
                 throw e;
+            } catch (InputManipulationException e) {
+                LOGGER.warning(
+                        "DoS detected and prevented. If the heuristic was too aggressive, " +
+                                "you can customize the behavior by setting the hudson.util.XStream2.collectionUpdateLimit system property. " +
+                                "See https://www.jenkins.io/redirect/xstream-dos-prevention for more information.");
+                throw new CriticalXStreamException(e);
             } catch (XStreamException e) {
                 if (critical) {
                     throw new CriticalXStreamException(e);
@@ -376,10 +442,10 @@ public class RobustReflectionConverter implements Converter {
             reader.moveUp();
         }
 
-        // Report any class/field errors in Saveable objects if it happens during loading of existing data from disk
-        if (shouldReportUnloadableDataForCurrentUser() && context.get("ReadError") != null && context.get("Saveable") == result) {
+        // Report any class/field errors in Saveable objects
+        if (context.get("ReadError") != null && context.get("Saveable") == result) {
             // Avoid any error in OldDataMonitor to be catastrophic. See JENKINS-62231 and JENKINS-59582
-            // The root cause is the OldDataMonitor extension is not ready before a plugin triggers an error, for 
+            // The root cause is the OldDataMonitor extension is not ready before a plugin triggers an error, for
             // example when trying to load a field that was created by a new version and you downgrade to the previous
             // one.
             try {
@@ -397,6 +463,22 @@ public class RobustReflectionConverter implements Converter {
             }
             context.put("ReadError", null);
         }
+
+        if (context.get("Saveable") == result) {
+            // If we're at the top level, emit a log message about the number of collection elements we type-checked.
+            Integer checked = (Integer) context.get(FIELD_VALUE_ELEMENTS_CHECKED);
+            if (checked != null) {
+                if (checked > FIELD_VALUE_ELEMENT_CHECK_WARNING_THRESHOLD) {
+                    // Emit a warning when we're getting close to the limit
+                    LOGGER.log(Level.WARNING,
+                            "Collection type checked {0} elements while deserializing {1}. The limit is {2} and deserialization will fail when exceeded. It can be changed by setting the system property `"
+                                    + RobustReflectionConverter.class.getName() + ".fieldValueElementCheckLimit`",
+                            new Object[] { checked, result.getClass().getName(), FIELD_VALUE_ELEMENT_CHECK_LIMIT });
+                } else {
+                    LOGGER.log(FINE, "Collection type checked {0} elements while deserializing {1}", new Object[] { checked, result.getClass().getName() });
+                }
+            }
+        }
         return result;
     }
 
@@ -409,7 +491,9 @@ public class RobustReflectionConverter implements Converter {
      *
      * @return whether the current user authentication is allowed to have errors loading data reported.
      */
-    private static boolean shouldReportUnloadableDataForCurrentUser() {
+    @Restricted(NoExternalUse.class)
+    public static boolean shouldReportUnloadableDataErrors() {
+        // TODO This should probably be moved to ODM
         if (RECORD_FAILURES_FOR_ALL_AUTHENTICATIONS) {
             return true;
         }
@@ -422,32 +506,234 @@ public class RobustReflectionConverter implements Converter {
 
     public static void addErrorInContext(UnmarshallingContext context, Throwable e) {
         LOGGER.log(FINE, "Failed to load", e);
-        ArrayList<Throwable> list = (ArrayList<Throwable>)context.get("ReadError");
+        ArrayList<Throwable> list = (ArrayList<Throwable>) context.get("ReadError");
         if (list == null)
             context.put("ReadError", list = new ArrayList<>());
         list.add(e);
     }
 
+    /**
+     * Returns true when the current XML element carrying a {@link PersistenceRoot}-typed field is
+     * safe to unmarshal. There are three safe patterns:
+     *
+     * <ol>
+     *   <li><b>XStream back-reference</b>: the element has a {@code reference=} system attribute.
+     *       XStream resolves this to an already-deserialized ancestor object from the current context
+     *       (e.g. {@code <owner class="hudson" reference="../../.."/>} inside a view serialized into
+     *       the same config.xml as the Jenkins root). No new object is constructed; no attacker-controlled
+     *       state enters the graph.</li>
+     *   <li><b>Replacement placeholder</b>: the element carries a {@code resolves-to} attribute naming
+     *       a non-{@link PersistenceRoot} type (e.g. {@code Run$Replacer} or {@code User$Replacer})
+     *       and has no {@code class=} override. The placeholder's {@code readResolve()} looks up the
+     *       live instance by ID rather than carrying attacker-controlled state.</li>
+     *   <li><b>Single-value reference</b>: the element has a {@code class=} attribute and the resolved
+     *       type has a {@link com.thoughtworks.xstream.converters.SingleValueConverter} registered in the
+     *       converter lookup. Such converters (e.g. {@link com.thoughtworks.xstream.converters.basic.AbstractSingleValueConverter})
+     *       serialize a {@link PersistenceRoot} as a plain identifier string (no child XML elements), so
+     *       no attacker-controlled object graph can be injected via reflection.
+     *       Example: {@code Queue.XSTREAM}'s converter for {@code hudson.model.Item} writes
+     *       {@code <task class="hudson.model.FreeStyleProject">project-name</task>}; the text content is
+     *       handled by the single-value converter which performs a safe registry lookup.</li>
+     * </ol>
+     */
+    // TODO Look into removing this and letting PersistenceRootGuardingMarshallingStrategy handle it
+    private boolean isSafePersistenceRootReference(HierarchicalStreamReader reader, Class<?> determinedType) {
+        // Pattern 1: XStream back-reference — already-deserialized object, nothing new constructed.
+        String referenceAttr = reader.getAttribute(mapper.aliasForSystemAttribute("reference"));
+        if (referenceAttr != null) {
+            return true;
+        }
+        // Pattern 2: writeReplace placeholder — resolves-to names a non-PersistenceRoot replacer class,
+        // and there is no class= attribute that could override it with an arbitrary PersistenceRoot.
+        String classAttr = reader.getAttribute(mapper.aliasForAttribute("class"));
+        if (classAttr != null) {
+            // Pattern 3: single-value reference — the resolved type is assignable to the field and
+            // has a SingleValueConverter registered (e.g. Queue.XSTREAM's converter for hudson.model.Item).
+            // Such converters serialize PersistenceRoot objects as plain identifier strings with no
+            // child XML elements, so no attacker-controlled object graph can be injected.
+            if (converterLookup != null) {
+                try {
+                    Class<?> resolvedType = mapper.realClass(classAttr);
+                    if (determinedType.isAssignableFrom(resolvedType) && converterLookup.lookupConverterForType(resolvedType) instanceof SingleValueConverter) {
+                        return true;
+                    }
+                } catch (Exception ignored) {
+                    // class not resolvable — fall through
+                }
+            }
+            return false;
+        }
+        String resolvesToAttr = reader.getAttribute(mapper.aliasForAttribute("resolves-to"));
+        if (resolvesToAttr == null) {
+            return false;
+        }
+        try {
+            Class<?> replacerType = mapper.realClass(resolvesToAttr);
+            return !PersistenceRoot.class.isAssignableFrom(replacerType);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private boolean fieldDefinedInClass(Object result, String attrName) {
         // during unmarshalling, unmarshal into transient fields like XStream 1.1.3
+        // unless @XStreamNotDeserializable is used or TRANSIENT_FIELD_STRICT_MODE is set.
         //boolean fieldExistsInClass = reflectionProvider.fieldDefinedInClass(attrName, result.getClass());
-        return reflectionProvider.getFieldOrNull(result.getClass(),attrName)!=null;
+        Field field = reflectionProvider.getFieldOrNull(result.getClass(), attrName);
+        if (field == null) {
+            return false;
+        }
+        if (!Modifier.isTransient(field.getModifiers())) {
+            return true;
+        }
+        if (!DISABLE_XSTREAM_NOT_DESERIALIZABLE_CHECK
+                && Arrays.stream(field.getAnnotations()).anyMatch(a -> "XStreamNotDeserializable".equals(a.annotationType().getSimpleName()))) {
+            return false;
+        }
+        return !TRANSIENT_FIELD_STRICT_MODE || Arrays.stream(field.getAnnotations()).anyMatch(a -> "XStreamDeserializable".equals(a.annotationType().getSimpleName()));
     }
 
     protected Object unmarshalField(final UnmarshallingContext context, final Object result, Class type, Field field) {
+        if (!ALLOW_ALL_OBJECT_FIELDS
+                && field.getType().equals(Object.class)
+                // To allow plugins to declare fields safe to deserialize without needing a new core dependency immediately, only check the simple class name
+                && Arrays.stream(field.getAnnotations()).noneMatch(a -> "XstreamSafeObjectField".equals(a.annotationType().getSimpleName()))
+                && !SAFE_TYPES_WITH_OBJECT_FIELDS.contains(field.getDeclaringClass().getName())) {
+            final String declaringClassName = field.getDeclaringClass().getName();
+            final String msg = "Refusing to unmarshal type '" + type.getName() + "' to Object typed field '" + field.getName() + "' in '" + declaringClassName +
+                    "'. Update the plugin defining this class to a compatible release, set the Java system property '" + RobustReflectionConverter.class.getName() +
+                    ".SAFE_TYPES_WITH_OBJECT_FIELDS' to add known safe types (add '" + declaringClassName +
+                    "' to the comma-separated list for this occurrence), or disable this protection entirely by setting the Java system property '" + RobustReflectionConverter.class.getName() +
+                    ".ALLOW_ALL_OBJECT_FIELDS' to 'true'. Learn more: https://www.jenkins.io/redirect/safe-object-field/";
+            LOGGER.log(Level.WARNING, msg);
+            throw new CriticalXStreamException(new XStreamException(msg));
+        }
         Converter converter = mapper.getLocalConverter(field.getDeclaringClass(), field.getName());
+        if (converter == null) {
+            if (new RobustCollectionConverter(mapper, reflectionProvider).canConvert(type)) {
+                converter = new RobustCollectionConverter(mapper, reflectionProvider, field.getGenericType());
+            } else if (new RobustMapConverter(mapper).canConvert(type)) {
+                converter = new RobustMapConverter(mapper, field.getGenericType());
+            } else if (DescribableList.ConverterImpl.canConvertRobust(type)) {
+                Class<?> elementType = extractElementType(field.getGenericType(), DescribableList.class);
+                converter = new DescribableList.ConverterImpl(mapper, elementType);
+            } else if (PersistedList.ConverterImpl.canConvertRobust(type)) {
+                Class<?> elementType = extractElementType(field.getGenericType(), PersistedList.class);
+                converter = new PersistedList.ConverterImpl(mapper, elementType);
+            } else if (CopyOnWriteList.ConverterImpl.canConvertRobust(type)) {
+                Class<?> elementType = extractElementType(field.getGenericType(), CopyOnWriteList.class);
+                converter = new CopyOnWriteList.ConverterImpl(mapper, elementType);
+            }
+        }
         return context.convertAnother(result, type, converter);
     }
 
-    private Map writeValueToImplicitCollection(UnmarshallingContext context, Object value, Map implicitCollections, Object result, String itemFieldName) {
+    /**
+     * Extracts the element type from a generic list type.
+     * For example, given {@code DescribableList<Foo, Descriptor<Foo>>}, returns {@code Foo.class}.
+     */
+    static Class<?> extractElementType(Type genericType, Class<?> listClass) {
+        if (genericType != null && listClass.isAssignableFrom(Types.erasure(genericType))) {
+            var baseType = Types.getBaseClass(genericType, listClass);
+            // Get the first type argument (the element type T)
+            var typeArg = Types.getTypeArgument(baseType, 0, Object.class);
+            return Types.erasure(typeArg);
+        }
+        return null;
+    }
+
+    /**
+     * Validates the elements (or keys and values) of a Collection, Map, or CopyOnWriteList field value
+     * against the type arguments declared on the field, regardless of which converter produced the value.
+     * Rejects the whole value rather than individual elements, as the container may be immutable.
+     *
+     * @throws ConversionException if an element has an invalid type
+     */
+    private void checkFieldValueElementTypes(UnmarshallingContext context, HierarchicalStreamReader reader, Field field, Object value) {
+        if (SKIP_FIELD_VALUE_ELEMENT_TYPE_CHECK) {
+            return;
+        }
+        Type genericType = field.getGenericType();
+        if (value instanceof Map<?, ?> map) {
+            if (Map.class.isAssignableFrom(Types.erasure(genericType))) {
+                var baseType = Types.getBaseClass(genericType, Map.class);
+                try {
+                    checkFieldValueElements(context, reader, field, map.keySet(),
+                            Types.erasure(Types.getTypeArgument(baseType, 0, Object.class)));
+                    checkFieldValueElements(context, reader, field, map.values(),
+                            Types.erasure(Types.getTypeArgument(baseType, 1, Object.class)));
+                } catch (XStreamException e) {
+                    throw e;
+                } catch (RuntimeException e) {
+                    if (ACCEPT_NON_ITERABLE_COLLECTIONS) {
+                        return;
+                    }
+                    var exception = new ConversionException(
+                            "Map field '" + field.getName() + "' cannot be validated: broken internal state after deserialization", e);
+                    exception.add("converter-type", getClass().getName());
+                    reader.appendErrors(exception);
+                    throw exception;
+                }
+            }
+        } else if (value instanceof Collection<?> collection) {
+            checkFieldValueElements(context, reader, field, collection, extractElementType(genericType, Collection.class));
+        } else if (value instanceof CopyOnWriteList<?> cowl) {
+            checkFieldValueElements(context, reader, field, cowl, extractElementType(genericType, CopyOnWriteList.class));
+        }
+    }
+
+    private void checkFieldValueElements(UnmarshallingContext context, HierarchicalStreamReader reader, Field field,
+            Iterable<?> elements, @CheckForNull Class<?> elementType) {
+        if (elementType == null || elementType == Object.class) {
+            return;
+        }
+        try {
+            for (Object element : elements) {
+                Integer checked = (Integer) context.get(FIELD_VALUE_ELEMENTS_CHECKED);
+                int count = (checked != null ? checked : 0) + 1;
+                if (count > FIELD_VALUE_ELEMENT_CHECK_LIMIT) {
+                    throw new InputManipulationException(
+                            "Validation budget exceeded: checked " + count + " collection/map elements during deserialization (limit: "
+                                    + FIELD_VALUE_ELEMENT_CHECK_LIMIT + ")");
+                }
+                context.put(FIELD_VALUE_ELEMENTS_CHECKED, count);
+                if (element != null && !elementType.isInstance(element)) {
+                    var exception = new ConversionException("Invalid element type in value for field: " + field.getName());
+                    exception.add("required-type", elementType.getName());
+                    exception.add("class", element.getClass().getName());
+                    exception.add("converter-type", getClass().getName());
+                    reader.appendErrors(exception);
+                    throw exception;
+                }
+            }
+        } catch (XStreamException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            if (ACCEPT_NON_ITERABLE_COLLECTIONS) {
+                return;
+            }
+            var exception = new ConversionException(
+                    "Collection field '" + field.getName() + "' cannot be validated: broken internal state after deserialization", e);
+            exception.add("converter-type", getClass().getName());
+            reader.appendErrors(exception);
+            throw exception;
+        }
+    }
+
+    private void writeValueToImplicitCollection(
+            HierarchicalStreamReader reader,
+            UnmarshallingContext context,
+            Object value,
+            Map<String, Collection<Object>> implicitCollections,
+            Map<String, Class<?>> implicitCollectionElementTypes,
+            Object result,
+            String itemFieldName) {
         String fieldName = mapper.getFieldNameForItemTypeAndName(context.getRequiredType(), value.getClass(), itemFieldName);
         if (fieldName != null) {
-            if (implicitCollections == null) {
-                implicitCollections = new HashMap(); // lazy instantiation
-            }
-            Collection collection = (Collection) implicitCollections.get(fieldName);
+            Collection collection = implicitCollections.get(fieldName);
             if (collection == null) {
-                Class fieldType = mapper.defaultImplementationOf(reflectionProvider.getFieldType(result, fieldName, null));
+                Field field = reflectionProvider.getField(result.getClass(), fieldName);
+                Class<?> fieldType = mapper.defaultImplementationOf(field.getType());
                 if (!Collection.class.isAssignableFrom(fieldType)) {
                     throw new ObjectAccessException("Field " + fieldName + " of " + result.getClass().getName() +
                             " is configured for an implicit Collection, but field is of type " + fieldType.getName());
@@ -455,13 +741,28 @@ public class RobustReflectionConverter implements Converter {
                 if (pureJavaReflectionProvider == null) {
                     pureJavaReflectionProvider = new PureJavaReflectionProvider();
                 }
-                collection = (Collection)pureJavaReflectionProvider.newInstance(fieldType);
+                collection = (Collection) pureJavaReflectionProvider.newInstance(fieldType);
                 reflectionProvider.writeField(result, fieldName, collection, null);
                 implicitCollections.put(fieldName, collection);
+                Type fieldGenericType = field.getGenericType();
+                Type elementGenericType = Types.getTypeArgument(Types.getBaseClass(fieldGenericType, Collection.class), 0, Object.class);
+                Class<?> elementType = Types.erasure(elementGenericType);
+                implicitCollectionElementTypes.put(fieldName, elementType);
+            }
+            Class<?> elementType = implicitCollectionElementTypes.getOrDefault(fieldName, Object.class);
+            if (!elementType.isInstance(value)) {
+                var exception = new ConversionException("Invalid element type for implicit collection for field: " + fieldName);
+                // c.f. TreeUnmarshaller.addInformationTo
+                exception.add("required-type", elementType.getName());
+                exception.add("class", value.getClass().getName());
+                exception.add("converter-type", getClass().getName());
+                reader.appendErrors(exception);
+                throw exception;
             }
             collection.add(value);
+        } else {
+            // TODO: Should we warn in this case? The value will be ignored.
         }
-        return implicitCollections;
     }
 
     private Class determineWhichClassDefinesField(HierarchicalStreamReader reader) {
@@ -471,8 +772,17 @@ public class RobustReflectionConverter implements Converter {
 
     protected Object instantiateNewInstance(HierarchicalStreamReader reader, UnmarshallingContext context) {
         String readResolveValue = reader.getAttribute(mapper.aliasForAttribute("resolves-to"));
-
-        Class type = readResolveValue != null ? mapper.realClass(readResolveValue) : context.getRequiredType();
+        Class type;
+        if (readResolveValue != null) {
+            type = mapper.realClass(readResolveValue);
+            String name = type.getName();
+            if (ClassFilter.DEFAULT.isBlacklisted(name) || ClassFilter.DEFAULT.isBlacklisted(type)) {
+                final String msg = "Refusing to instantiate resolves-to type '" + name + "'";
+                throw new CriticalXStreamException(new XStreamException(msg));
+            }
+        } else {
+            type = context.getRequiredType();
+        }
 
         Object currentObject = context.currentObject();
         if (currentObject != null) {
@@ -502,10 +812,10 @@ public class RobustReflectionConverter implements Converter {
 
     private Class determineType(HierarchicalStreamReader reader, boolean validField, Object result, String fieldName, Class definedInCls) {
         String classAttribute = reader.getAttribute(mapper.aliasForAttribute("class"));
-        Class fieldType = reflectionProvider.getFieldType(result, fieldName, definedInCls);
         if (classAttribute != null) {
             Class specifiedType = mapper.realClass(classAttribute);
-            if(fieldType.isAssignableFrom(specifiedType))
+            Class fieldType = reflectionProvider.getFieldType(result, fieldName, definedInCls);
+            if (fieldType.isAssignableFrom(specifiedType))
                 // make sure that the specified type in XML is compatible with the field type.
                 // this allows the code to evolve in more flexible way.
                 return specifiedType;
@@ -518,6 +828,7 @@ public class RobustReflectionConverter implements Converter {
                 return mapper.realClass(reader.getNodeName());
             }
         } else {
+            Class fieldType = reflectionProvider.getFieldType(result, fieldName, definedInCls);
             return mapper.defaultImplementationOf(fieldType);
         }
     }

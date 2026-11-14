@@ -21,21 +21,21 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import hudson.model.Saveable;
-import org.junit.Test;
-
 import java.io.IOException;
+import org.junit.jupiter.api.Test;
 
 /**
  * Tests {@link BulkChange}.
  *
  * @author Kohsuke Kawaguchi
  */
-public class BulkChangeTest {
+class BulkChangeTest {
 
     private static class Point implements Saveable {
         /**
@@ -44,7 +44,7 @@ public class BulkChangeTest {
         int saveCount = 0;
 
         @SuppressWarnings("unused")
-        int x,y;
+        int x, y;
 
         public void setX(int x) throws IOException {
             this.x = x;
@@ -61,8 +61,9 @@ public class BulkChangeTest {
             setY(y);
         }
 
-        public void save() throws IOException {
-            if(BulkChange.contains(this))   return;
+        @Override
+        public void save() {
+            if (BulkChange.contains(this))   return;
             saveCount++;
         }
     }
@@ -71,32 +72,32 @@ public class BulkChangeTest {
      * If there is no BulkChange, we should see two saves.
      */
     @Test
-    public void noBulkChange() throws Exception {
+    void noBulkChange() throws Exception {
         Point pt = new Point();
-        pt.set(0,0);
-        assertEquals(2,pt.saveCount);
+        pt.set(0, 0);
+        assertEquals(2, pt.saveCount);
     }
 
     /**
      * With a {@link BulkChange}, this will become just one save.
      */
     @Test
-    public void bulkChange() throws Exception {
+    void bulkChange() throws Exception {
         Point pt = new Point();
         BulkChange bc = new BulkChange(pt);
         try {
-            pt.set(0,0);
+            pt.set(0, 0);
         } finally {
             bc.commit();
         }
-        assertEquals(1,pt.saveCount);
+        assertEquals(1, pt.saveCount);
     }
 
     /**
      * {@link BulkChange}s can be nested.
      */
     @Test
-    public void nestedBulkChange() throws Exception {
+    void nestedBulkChange() throws Exception {
         Point pt = new Point();
         Point pt2 = new Point();
         BulkChange bc1 = new BulkChange(pt);
@@ -105,17 +106,17 @@ public class BulkChangeTest {
             try {
                 BulkChange bc3 = new BulkChange(pt);
                 try {
-                    pt.set(0,0);
+                    pt.set(0, 0);
                 } finally {
                     bc3.commit();
                 }
             } finally {
                 bc2.commit();
             }
-            pt.set(0,0);
+            pt.set(0, 0);
         } finally {
             bc1.commit();
         }
-        assertEquals(1,pt.saveCount);
+        assertEquals(1, pt.saveCount);
     }
 }

@@ -21,40 +21,47 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security.stapler;
 
-import org.apache.commons.io.FileUtils;
-import org.junit.Rule;
-import org.junit.Test;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.For;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.recipes.LocalData;
 
-import java.io.File;
-
-import static org.hamcrest.CoreMatchers.allOf;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.CoreMatchers.not;
-import static org.junit.Assert.assertFalse;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-
 /**
- * Due to the fact we are using a @ClassRule for the other tests to improve performance, 
+ * Due to the fact we are using a @ClassRule for the other tests to improve performance,
  * we cannot use @LocalData to test the loading of the whitelist as that annotation seem to not work with @ClassRule.
  */
 @Issue("SECURITY-400")
 @For(StaticRoutingDecisionProvider.class)
-public class StaticRoutingDecisionProvider2Test {
-    
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-    
+@WithJenkins
+class StaticRoutingDecisionProvider2Test {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
     @Test
     @LocalData("whitelist_empty")
-    public void userControlledWhitelist_empty_Loading() throws Exception {
+    void userControlledWhitelist_empty_Loading() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
         assertThat(
                 wl.decide("public java.lang.Object jenkins.security.stapler.StaticRoutingDecisionProviderTest$ContentProvider.getObjectCustom()"),
@@ -65,10 +72,10 @@ public class StaticRoutingDecisionProvider2Test {
                 is(RoutingDecisionProvider.Decision.UNKNOWN)
         );
     }
-    
+
     @Test
     @LocalData("whitelist_monoline")
-    public void userControlledWhitelist_monoline_Loading() throws Exception {
+    void userControlledWhitelist_monoline_Loading() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
         assertThat(
                 wl.decide("method jenkins.security.stapler.StaticRoutingDecisionProviderTest$ContentProvider getObjectCustom"),
@@ -79,10 +86,10 @@ public class StaticRoutingDecisionProvider2Test {
                 is(RoutingDecisionProvider.Decision.UNKNOWN)
         );
     }
-    
+
     @Test
     @LocalData("whitelist_multiline")
-    public void userControlledWhitelist_multiline_Loading() throws Exception {
+    void userControlledWhitelist_multiline_Loading() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
         assertThat(
                 wl.decide("method jenkins.security.stapler.StaticRoutingDecisionProviderTest$ContentProvider getObjectCustom"),
@@ -97,23 +104,23 @@ public class StaticRoutingDecisionProvider2Test {
                 is(RoutingDecisionProvider.Decision.UNKNOWN)
         );
     }
-    
+
     @Test
     @LocalData("comment_ignored")
-    public void userControlledWhitelist_commentsAreIgnored() throws Exception {
+    void userControlledWhitelist_commentsAreIgnored() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
         assertThat(wl.decide("this line is not read"), is(RoutingDecisionProvider.Decision.UNKNOWN));
         assertThat(wl.decide("not-this-one"), is(RoutingDecisionProvider.Decision.UNKNOWN));
         assertThat(wl.decide("neither"), is(RoutingDecisionProvider.Decision.UNKNOWN));
         assertThat(wl.decide("finally-not"), is(RoutingDecisionProvider.Decision.UNKNOWN));
-        
+
         assertThat(wl.decide("this-one-is"), is(RoutingDecisionProvider.Decision.ACCEPTED));
         assertThat(wl.decide("this-one-also"), is(RoutingDecisionProvider.Decision.ACCEPTED));
     }
-    
+
     @Test
     @LocalData("whitelist_emptyline")
-    public void userControlledWhitelist_emptyLinesAreIgnored() throws Exception {
+    void userControlledWhitelist_emptyLinesAreIgnored() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
         assertThat(wl.decide("signature-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
         assertThat(wl.decide("signature-2"), is(RoutingDecisionProvider.Decision.ACCEPTED));
@@ -121,25 +128,25 @@ public class StaticRoutingDecisionProvider2Test {
         // neither the empty line or an exclamation mark followed by nothing or spaces are not considered
         assertThat(wl.decide(""), is(RoutingDecisionProvider.Decision.UNKNOWN));
     }
-    
+
     @Test
     @LocalData("greylist_multiline")
-    public void userControlledWhitelist_whiteAndBlack() throws Exception {
+    void userControlledWhitelist_whiteAndBlack() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
         assertThat(wl.decide("signature-1-ok"), is(RoutingDecisionProvider.Decision.ACCEPTED));
         assertThat(wl.decide("signature-3-ok"), is(RoutingDecisionProvider.Decision.ACCEPTED));
-        
+
         assertThat(wl.decide("signature-2-not-ok"), is(RoutingDecisionProvider.Decision.REJECTED));
         assertThat(wl.decide("signature-4-not-ok"), is(RoutingDecisionProvider.Decision.REJECTED));
-        
+
         // the exclamation mark is not used
         assertThat(wl.decide("!signature-2-not-ok"), is(RoutingDecisionProvider.Decision.UNKNOWN));
     }
-    
+
     @Test
-    public void defaultList() throws Exception {
+    void defaultList() {
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
-        
+
         assertThat(
                 wl.decide("method io.jenkins.blueocean.service.embedded.rest.AbstractRunImpl getLog"),
                 is(RoutingDecisionProvider.Decision.ACCEPTED)
@@ -152,7 +159,7 @@ public class StaticRoutingDecisionProvider2Test {
                 wl.decide("method io.jenkins.blueocean.rest.impl.pipeline.PipelineStepImpl getLog"),
                 is(RoutingDecisionProvider.Decision.ACCEPTED)
         );
-        
+
         assertThat(wl.decide("method jenkins.security.stapler.StaticRoutingDecisionProviderTest$ContentProvider getObjectCustom"),
                 is(RoutingDecisionProvider.Decision.UNKNOWN)
         );
@@ -160,73 +167,73 @@ public class StaticRoutingDecisionProvider2Test {
                 is(RoutingDecisionProvider.Decision.UNKNOWN)
         );
     }
-    
+
     @Test
-    public void userControlledWhitelist_savedCorrectly() throws Exception {
-        File whitelistUserControlledList = new File(j.jenkins.getRootDir(), "stapler-whitelist.txt");
-        
-        assertFalse(whitelistUserControlledList.exists());
-        
+    void userControlledWhitelist_savedCorrectly() throws Exception {
+        Path whitelistUserControlledList = j.jenkins.getRootDir().toPath().resolve("stapler-whitelist.txt");
+
+        assertFalse(Files.exists(whitelistUserControlledList));
+
         StaticRoutingDecisionProvider wl = new StaticRoutingDecisionProvider();
-        
-        assertFalse(whitelistUserControlledList.exists());
-        
+
+        assertFalse(Files.exists(whitelistUserControlledList));
+
         assertThat(wl.decide("nothing"), is(RoutingDecisionProvider.Decision.UNKNOWN));
-        
+
         wl.save();
-        assertTrue(whitelistUserControlledList.exists());
-        assertThat(FileUtils.readFileToString(whitelistUserControlledList), is(""));
-        
+        assertTrue(Files.exists(whitelistUserControlledList));
+        assertThat(Files.readString(whitelistUserControlledList, StandardCharsets.UTF_8), is(""));
+
         wl.add("white-1");
-        
+
         assertThat(wl.decide("white-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
-        
-        assertTrue(whitelistUserControlledList.exists());
-        assertThat(FileUtils.readFileToString(whitelistUserControlledList), containsString("white-1"));
+
+        assertTrue(Files.exists(whitelistUserControlledList));
+        assertThat(Files.readString(whitelistUserControlledList, StandardCharsets.UTF_8), containsString("white-1"));
         {
             StaticRoutingDecisionProvider temp = new StaticRoutingDecisionProvider();
             assertThat(temp.decide("white-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
         }
-        
+
         wl.addBlacklistSignature("black-2");
-        
+
         assertThat(wl.decide("white-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
         assertThat(wl.decide("black-2"), is(RoutingDecisionProvider.Decision.REJECTED));
-        assertThat(FileUtils.readFileToString(whitelistUserControlledList), allOf(
+        assertThat(Files.readString(whitelistUserControlledList, StandardCharsets.UTF_8), allOf(
                 containsString("white-1"),
                 containsString("!black-2")
         ));
-        
+
         {
             StaticRoutingDecisionProvider temp = new StaticRoutingDecisionProvider();
             assertThat(temp.decide("white-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
             assertThat(temp.decide("black-2"), is(RoutingDecisionProvider.Decision.REJECTED));
         }
-        
+
         wl.removeBlacklistSignature("black-2");
-        
+
         assertThat(wl.decide("white-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
         assertThat(wl.decide("black-2"), is(RoutingDecisionProvider.Decision.UNKNOWN));
-        assertThat(FileUtils.readFileToString(whitelistUserControlledList), allOf(
+        assertThat(Files.readString(whitelistUserControlledList, StandardCharsets.UTF_8), allOf(
                 containsString("white-1"),
                 not(containsString("black-2"))
         ));
-        
+
         {
             StaticRoutingDecisionProvider temp = new StaticRoutingDecisionProvider();
             assertThat(temp.decide("white-1"), is(RoutingDecisionProvider.Decision.ACCEPTED));
             assertThat(temp.decide("black-2"), is(RoutingDecisionProvider.Decision.UNKNOWN));
         }
-        
+
         wl.remove("white-1");
-        
+
         assertThat(wl.decide("white-1"), is(RoutingDecisionProvider.Decision.UNKNOWN));
         assertThat(wl.decide("black-2"), is(RoutingDecisionProvider.Decision.UNKNOWN));
-        assertThat(FileUtils.readFileToString(whitelistUserControlledList), allOf(
+        assertThat(Files.readString(whitelistUserControlledList, StandardCharsets.UTF_8), allOf(
                 not(containsString("white-1")),
                 not(containsString("black-2"))
         ));
-        
+
         {
             StaticRoutingDecisionProvider temp = new StaticRoutingDecisionProvider();
             assertThat(temp.decide("white-1"), is(RoutingDecisionProvider.Decision.UNKNOWN));

@@ -25,39 +25,45 @@
 package hudson.cli;
 
 import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
 import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
 import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.startsWith;
+
 import hudson.model.Computer;
 import jenkins.model.Jenkins;
-
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class GetNodeCommandTest {
+@WithJenkins
+class GetNodeCommandTest {
 
     private CLICommandInvoker command;
 
-    @Rule public final JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before public void setUp() {
-
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
         command = new CLICommandInvoker(j, new GetNodeCommand());
     }
 
-    @Test public void getNodeShouldFailWithoutComputerReadPermission() throws Exception {
+    @Test
+    void getNodeShouldFailWithoutComputerExtendedReadPermission() throws Exception {
 
-        j.createSlave("MySlave", null, null);
+        // JENKINS-65578 workaround
+        Computer.EXTENDED_READ.enabled = false;
+
+        j.createSlave("MyAgent", null, null);
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(Jenkins.READ)
-                .invokeWithArgs("MySlave")
+                .invokeWithArgs("MyAgent")
         ;
 
         assertThat(result.stderr(), containsString("ERROR: user is missing the Agent/Configure permission"));
@@ -65,42 +71,52 @@ public class GetNodeCommandTest {
         assertThat(result, hasNoStandardOutput());
     }
 
-    @Test public void getNodeShouldYieldConfigXml() throws Exception {
+    @Test
+    void getNodeShouldYieldConfigXml() throws Exception {
 
-        j.createSlave("MySlave", null, null);
+        j.createSlave("MyAgent", null, null);
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(Computer.EXTENDED_READ, Jenkins.READ)
-                .invokeWithArgs("MySlave")
+                .invokeWithArgs("MyAgent")
         ;
 
         assertThat(result.stdout(), startsWith("<?xml version=\"1.1\" encoding=\"UTF-8\"?>"));
-        assertThat(result.stdout(), containsString("<name>MySlave</name>"));
+        assertThat(result.stdout(), containsString("<name>MyAgent</name>"));
         assertThat(result, hasNoErrorOutput());
         assertThat(result, succeeded());
     }
 
-    @Test public void getNodeShouldFailIfNodeDoesNotExist() throws Exception {
+    @Test
+    void getNodeShouldFailIfNodeDoesNotExist() {
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(Computer.EXTENDED_READ, Jenkins.READ)
-                .invokeWithArgs("MySlave")
+                .invokeWithArgs("MyAgent")
         ;
 
-        assertThat(result.stderr(), containsString("ERROR: No such node 'MySlave'"));
+        assertThat(result.stderr(), containsString("ERROR: No such node 'MyAgent'"));
         assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
     }
 
     @Issue("SECURITY-281")
     @Test
-    public void getNodeShouldFailForMaster() throws Exception {
+    void getNodeShouldFailForBuiltInNode() {
         CLICommandInvoker.Result result = command.authorizedTo(Computer.EXTENDED_READ, Jenkins.READ).invokeWithArgs("");
         assertThat(result.stderr(), containsString("No such node ''"));
         assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
+
+        // old name
         result = command.authorizedTo(Computer.EXTENDED_READ, Jenkins.READ).invokeWithArgs("(master)");
         assertThat(result.stderr(), containsString("No such node '(master)'"));
+        assertThat(result, failedWith(3));
+        assertThat(result, hasNoStandardOutput());
+
+        // new name
+        result = command.authorizedTo(Computer.EXTENDED_READ, Jenkins.READ).invokeWithArgs("(built-in)");
+        assertThat(result.stderr(), containsString("No such node '(built-in)'"));
         assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
     }

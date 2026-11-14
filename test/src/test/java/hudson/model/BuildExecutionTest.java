@@ -24,41 +24,51 @@
 
 package hudson.model;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.slaves.WorkspaceList;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Notifier;
-import java.io.IOException;
-import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-import org.junit.Rule;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class BuildExecutionTest {
+@WithJenkins
+class BuildExecutionTest {
 
-    @Rule public JenkinsRule r = new JenkinsRule();
+    private JenkinsRule r;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
 
     @Issue("JENKINS-26698")
-    @Test public void workspaceReliablyReleased() throws Exception {
+    @Test
+    void workspaceReliablyReleased() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         p.getPublishersList().add(new BrokenPublisher());
-        FreeStyleBuild b = r.assertBuildStatus(Result.FAILURE, p.scheduleBuild2(0).get());
+        FreeStyleBuild b = r.buildAndAssertStatus(Result.FAILURE, p);
         r.assertLogContains(Messages.Build_post_build_steps_failed(), b);
         FilePath ws = r.jenkins.getWorkspaceFor(p);
         try (WorkspaceList.Lease lease = r.jenkins.toComputer().getWorkspaceList().allocate(ws)) {
             assertEquals(ws, lease.path);
         }
     }
-    
+
     private static class BrokenPublisher extends Notifier {
         @Override public boolean needsToRunAfterFinalized() {
             throw new IllegalStateException("oops");
         }
-        @Override public boolean perform(AbstractBuild<?,?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+
+        @Override public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) {
             return true;
         }
+
         @Override public BuildStepMonitor getRequiredMonitorService() {
             return BuildStepMonitor.NONE;
         }

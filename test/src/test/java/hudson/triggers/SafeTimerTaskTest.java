@@ -1,45 +1,49 @@
 package hudson.triggers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import hudson.model.AsyncPeriodicWork;
 import hudson.model.TaskListener;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.LoggerRule;
-import org.jvnet.hudson.test.TestExtension;
-
 import java.io.File;
 import java.io.IOException;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.LogRecorder;
+import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+@WithJenkins
+class SafeTimerTaskTest {
 
-public class SafeTimerTaskTest {
+    @TempDir
+    private File folder;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private final LogRecorder loggerRule = new LogRecorder();
 
-    @Rule
-    public TemporaryFolder folder = new TemporaryFolder();
+    private JenkinsRule j;
 
-    @Rule
-    public LoggerRule loggerRule = new LoggerRule();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
-    @After
-    public void tearDown() throws Exception {
+    @AfterEach
+    void tearDown() {
         System.clearProperty(SafeTimerTask.LOGS_ROOT_PATH_PROPERTY);
     }
 
     @Issue("JENKINS-50291")
     @Test
-    public void changeLogsRoot() throws Exception {
+    void changeLogsRoot() throws Exception {
         assertNull(System.getProperty(SafeTimerTask.LOGS_ROOT_PATH_PROPERTY));
 
-        File temporaryFolder = folder.newFolder();
+        File temporaryFolder = newFolder(folder, "junit");
 
         // Check historical default value
         final File logsRoot = new File(j.jenkins.getRootDir(), "logs/tasks");
@@ -59,12 +63,13 @@ public class SafeTimerTaskTest {
 
         public static final long RECURRENCE_PERIOD = 50L;
 
+        @SuppressWarnings("checkstyle:redundantmodifier")
         public LogSpammer() {
             super("wut");
         }
 
         @Override
-        protected void execute(TaskListener listener) throws IOException, InterruptedException {
+        protected void execute(TaskListener listener) {
             listener.getLogger().println("blah");
         }
 
@@ -72,5 +77,14 @@ public class SafeTimerTaskTest {
         public long getRecurrencePeriod() {
             return RECURRENCE_PERIOD;
         }
+    }
+
+    private static File newFolder(File root, String... subDirs) throws IOException {
+        String subFolder = String.join("/", subDirs);
+        File result = new File(root, subFolder);
+        if (!result.mkdirs()) {
+            throw new IOException("Couldn't create folders " + root);
+        }
+        return result;
     }
 }

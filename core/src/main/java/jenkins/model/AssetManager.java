@@ -1,23 +1,19 @@
 package jenkins.model;
 
-import hudson.Extension;
-import hudson.model.UnprotectedRootAction;
-
-import java.util.concurrent.TimeUnit;
-
-import jenkins.ClassLoaderReflectionToolkit;
-import org.apache.commons.lang.StringUtils;
-import org.jenkinsci.Symbol;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletResponse;
+import hudson.Extension;
+import hudson.model.UnprotectedRootAction;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URL;
 import java.util.Enumeration;
+import java.util.concurrent.TimeUnit;
+import jenkins.ClassLoaderReflectionToolkit;
+import org.jenkinsci.Symbol;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
 
 /**
  * Serves files located in the {@code /assets} classpath directory via the Jenkins core ClassLoader.
@@ -50,7 +46,7 @@ public class AssetManager implements UnprotectedRootAction {
     /**
      * Exposes assets in the core classloader over HTTP.
      */
-    public void doDynamic(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
+    public void doDynamic(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         String path = req.getRestOfPath();
         URL resource = findResource(path);
 
@@ -79,7 +75,7 @@ public class AssetManager implements UnprotectedRootAction {
      * doesn't find it, fall back to the parent classloader.
      */
     private @CheckForNull URL findResource(@NonNull String path) throws IOException {
-        if (StringUtils.isBlank(path)) {
+        if (path == null || path.isBlank()) {
             return null;
         }
 

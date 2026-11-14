@@ -24,73 +24,70 @@
 
 package hudson.security.csrf;
 
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.WebRequest;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
-import java.io.IOException;
-import java.net.URL;
-
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.ExtensionList;
 import hudson.model.UnprotectedRootAction;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.net.URL;
 import jenkins.model.Jenkins;
-import static org.hamcrest.Matchers.containsString;
-
-import jenkins.security.SuspiciousRequestFilter;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
-import org.junit.Rule;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.verb.POST;
 
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+@WithJenkins
+class CrumbExclusionTest {
 
-public class CrumbExclusionTest {
+    private JenkinsRule r;
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
-
-    @BeforeClass
-    public static void prepare() {
-        SuspiciousRequestFilter.allowSemicolonsInPath = true;
-    }
-
-    @AfterClass
-    public static void cleanup() {
-        SuspiciousRequestFilter.allowSemicolonsInPath = false;
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
     }
 
     @Issue("SECURITY-1774")
     @Test
-    public void pathInfo() throws Exception {
+    void pathInfo() throws Exception {
         r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
         r.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.ADMINISTER).everywhere().to("admin"));
         for (String path : new String[] {/* control */ "scriptText", /* test */ "scriptText/..;/cli"}) {
             try {
                 fail(path + " should have been rejected: " + r.createWebClient().login("admin").getPage(new WebRequest(new URL(r.getURL(), path + "?script=11*11"), HttpMethod.POST)).getWebResponse().getContentAsString());
             } catch (FailingHttpStatusCodeException x) {
-                assertEquals("status code using " + path, 403, x.getStatusCode());
-                assertThat("error message using " + path, x.getResponse().getContentAsString(), containsString("No valid crumb was included in the request"));
+                switch (x.getStatusCode()) {
+                case 403:
+                    assertThat("error message using " + path, x.getResponse().getContentAsString(), containsString("No valid crumb was included in the request"));
+                    break;
+                case 400: // from Jetty
+                    assertThat("error message using " + path, x.getResponse().getContentAsString(), containsString("path parameter"));
+                    break;
+                default:
+                    fail("unexpected error code");
+                }
             }
         }
     }
 
     @Test
-    public void regular() throws Exception {
+    void regular() throws Exception {
         r.createWebClient().getPage(new WebRequest(new URL(r.getURL(), "root/"), HttpMethod.POST));
-        Assert.assertTrue(ExtensionList.lookupSingleton(RootActionImpl.class).posted);
+        assertTrue(ExtensionList.lookupSingleton(RootActionImpl.class).posted);
     }
 
     @TestExtension
@@ -98,16 +95,19 @@ public class CrumbExclusionTest {
 
         public boolean posted = false;
 
+        @Override
         @CheckForNull
         public String getIconFileName() {
             return null;
         }
 
+        @Override
         @CheckForNull
         public String getDisplayName() {
             return null;
         }
 
+        @Override
         @CheckForNull
         public String getUrlName() {
             return "root";

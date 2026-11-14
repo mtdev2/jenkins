@@ -21,51 +21,64 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotSame;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import hudson.ExtensionList;
 import hudson.diagnosis.OldDataMonitor;
 import hudson.tasks.Builder;
 import hudson.tasks.Shell;
 import java.io.ByteArrayInputStream;
-
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import jenkins.model.Jenkins;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.experimental.categories.Category;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsRule.WebClient;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
-import org.jvnet.hudson.test.SmokeTest;
-
-import java.util.List;
-import java.io.File;
-import java.util.Map;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.jvnet.hudson.test.recipes.WithTimeout;
+import org.kohsuke.stapler.jelly.JellyFacet;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-@Category(SmokeTest.class)
-public class FreeStyleProjectTest {
+@Tag("SmokeTest")
+@WithJenkins
+class FreeStyleProjectTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    @TempDir
+    private File tempFolder;
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     /**
      * Tests a trivial configuration round-trip.
@@ -73,23 +86,23 @@ public class FreeStyleProjectTest {
      * The goal is to catch a P1-level issue that prevents all the form submissions to fail.
      */
     @Test
-    public void configSubmission() throws Exception {
+    void configSubmission() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject();
         Shell shell = new Shell("echo hello");
         project.getBuildersList().add(shell);
 
         // emulate the user behavior
         WebClient webClient = j.createWebClient();
-        HtmlPage page = webClient.getPage(project,"configure");
+        HtmlPage page = webClient.getPage(project, "configure");
 
         HtmlForm form = page.getFormByName("config");
         j.submit(form);
 
         List<Builder> builders = project.getBuilders();
-        assertEquals(1,builders.size());
-        assertEquals(Shell.class,builders.get(0).getClass());
-        assertEquals("echo hello",((Shell)builders.get(0)).getCommand().trim());
-        assertNotSame(builders.get(0), shell);
+        assertEquals(1, builders.size());
+        assertEquals(Shell.class, builders.getFirst().getClass());
+        assertEquals("echo hello", ((Shell) builders.getFirst()).getCommand().trim());
+        assertNotSame(builders.getFirst(), shell);
     }
 
     /**
@@ -97,10 +110,9 @@ public class FreeStyleProjectTest {
      */
     @Test
     @Issue("JENKINS-4206")
-    public void customWorkspaceAllocation() throws Exception {
+    void customWorkspaceAllocation() throws Exception {
         FreeStyleProject f = j.createFreeStyleProject();
-        File d = j.createTmpDir();
-        f.setCustomWorkspace(d.getPath());
+        f.setCustomWorkspace(newFolder(tempFolder, "junit").getPath());
         j.buildAndAssertSuccess(f);
     }
 
@@ -109,42 +121,43 @@ public class FreeStyleProjectTest {
      */
     @Test
     @Issue("JENKINS-3997")
-    public void customWorkspaceVariableExpansion() throws Exception {
+    void customWorkspaceVariableExpansion() throws Exception {
         FreeStyleProject f = j.createFreeStyleProject();
-        File d = new File(j.createTmpDir(),"${JOB_NAME}");
+        File d = new File(newFolder(tempFolder, "junit"), "${JOB_NAME}");
         f.setCustomWorkspace(d.getPath());
         FreeStyleBuild b = j.buildAndAssertSuccess(f);
 
         String path = b.getWorkspace().getRemote();
         System.out.println(path);
         assertFalse(path.contains("${JOB_NAME}"));
-        assertEquals(b.getWorkspace().getName(),f.getName());
+        assertEquals(b.getWorkspace().getName(), f.getName());
     }
 
     @Test
     @Issue("JENKINS-15817")
-    public void minimalConfigXml() throws Exception {
+    void minimalConfigXml() throws Exception {
         // Make sure it can be created without exceptions:
-        FreeStyleProject project = (FreeStyleProject) j.jenkins.createProjectFromXML("stuff", new ByteArrayInputStream("<project/>".getBytes()));
+        FreeStyleProject project = (FreeStyleProject) j.jenkins.createProjectFromXML("stuff", new ByteArrayInputStream("<project/>".getBytes(StandardCharsets.UTF_8)));
         System.out.println(project.getConfigFile().asString());
         // and round-tripped:
         Shell shell = new Shell("echo hello");
         project.getBuildersList().add(shell);
         WebClient webClient = j.createWebClient();
-        HtmlPage page = webClient.getPage(project,"configure");
+        HtmlPage page = webClient.getPage(project, "configure");
         HtmlForm form = page.getFormByName("config");
         j.submit(form);
         List<Builder> builders = project.getBuilders();
-        assertEquals(1,builders.size());
-        assertEquals(Shell.class,builders.get(0).getClass());
-        assertEquals("echo hello",((Shell)builders.get(0)).getCommand().trim());
-        assertNotSame(builders.get(0), shell);
+        assertEquals(1, builders.size());
+        assertEquals(Shell.class, builders.getFirst().getClass());
+        assertEquals("echo hello", ((Shell) builders.getFirst()).getCommand().trim());
+        assertNotSame(builders.getFirst(), shell);
         System.out.println(project.getConfigFile().asString());
     }
 
     @Test
     @Issue("JENKINS-36629")
-    public void buildStabilityReports() throws Exception {
+    @WithTimeout(300)
+    void buildStabilityReports() throws Exception {
         for (int i = 0; i <= 32; i++) {
             FreeStyleProject p = j.createFreeStyleProject(String.format("Pattern-%s", Integer.toBinaryString(i)));
             int expectedFails = 0;
@@ -155,18 +168,20 @@ public class FreeStyleProjectTest {
                     if (j <= 16) {
                         expectedFails++;
                     }
+                    this.j.buildAndAssertStatus(Result.FAILURE, p);
+                } else {
+                    this.j.buildAndAssertSuccess(p);
                 }
-                p.scheduleBuild2(0).get();
             }
             HealthReport health = p.getBuildHealth();
 
-            assertThat(String.format("Pattern %s score", Integer.toBinaryString(i)), health.getScore(), is(100*(5-expectedFails)/5));
+            assertThat(String.format("Pattern %s score", Integer.toBinaryString(i)), health.getScore(), is(100 * (5 - expectedFails) / 5));
         }
     }
 
     @Issue("SECURITY-1923")
     @Test
-    public void configDotXmlWithValidXmlAndBadField() throws Exception {
+    void configDotXmlWithValidXmlAndBadField() throws Exception {
         final String CONFIGURATOR = "configure_user";
 
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
@@ -184,32 +199,117 @@ public class FreeStyleProjectTest {
         req.setAdditionalHeader("Content-Type", "application/xml");
         req.setRequestBody(VALID_XML_BAD_FIELD_USER_XML);
 
-        try {
-            wc.getPage(req);
-            fail("Should have returned failure.");
-        } catch (FailingHttpStatusCodeException e) {
-            // This really shouldn't return 500, but that's what it does now.
-            assertThat(e.getStatusCode(), equalTo(500));
-        }
+        FailingHttpStatusCodeException e = assertThrows(FailingHttpStatusCodeException.class, () -> wc.getPage(req));
+        // This really shouldn't return 500, but that's what it does now.
+        assertThat(e.getStatusCode(), equalTo(500));
 
         OldDataMonitor odm = ExtensionList.lookupSingleton(OldDataMonitor.class);
         Map<Saveable, OldDataMonitor.VersionRange> data = odm.getData();
 
         assertThat(data.size(), equalTo(0));
 
-        odm.doDiscard(null, null);
+        odm.doDiscard();
 
         User.AllUsers.scanAll();
         boolean createUser = false;
         User badUser = User.getById("foo", createUser);
 
-        assertNull("Should not have created user.", badUser);
+        assertNull(badUser, "Should not have created user.");
     }
 
     private static final String VALID_XML_BAD_FIELD_USER_XML =
-            "<hudson.model.User>\n" +
-                    "  <id>foo</id>\n" +
-                    "  <fullName>Foo User</fullName>\n" +
-                    "  <badField/>\n" +
-                    "</hudson.model.User>\n";
+            """
+                    <hudson.model.User>
+                      <id>foo</id>
+                      <fullName>Foo User</fullName>
+                      <badField/>
+                    </hudson.model.User>
+                    """;
+
+    @Test
+    @Issue("JENKINS-65288")
+    void submitPossibleWithoutJellyTrace() throws Exception {
+        FreeStyleProject freeStyleProject = j.createFreeStyleProject();
+
+        JenkinsRule.WebClient wc = j.createWebClient();
+        HtmlPage htmlPage = wc.goTo(freeStyleProject.getUrl() + "configure");
+        HtmlForm configForm = htmlPage.getFormByName("config");
+        j.assertGoodStatus(j.submit(configForm));
+    }
+
+    /**
+     * Ensure the form is still working when using {@link org.kohsuke.stapler.jelly.JellyFacet#TRACE}=true
+     */
+    @Test
+    @Issue("JENKINS-65288")
+    void submitPossibleWithJellyTrace() throws Exception {
+        boolean currentValue = JellyFacet.TRACE;
+        try {
+            JellyFacet.TRACE = true;
+
+            FreeStyleProject freeStyleProject = j.createFreeStyleProject();
+
+            JenkinsRule.WebClient wc = j.createWebClient();
+            HtmlPage htmlPage = wc.goTo(freeStyleProject.getUrl() + "configure");
+            HtmlForm configForm = htmlPage.getFormByName("config");
+            j.assertGoodStatus(j.submit(configForm));
+        } finally {
+            JellyFacet.TRACE = currentValue;
+        }
+    }
+
+    @Test
+    @Issue("SECURITY-2424")
+    void cannotCreateJobWithTrailingDot_withoutOtherJob() {
+        assertThat(j.jenkins.getItems(), hasSize(0));
+        Failure e = assertThrows(
+                Failure.class,
+                () -> j.jenkins.createProjectFromXML("jobA.", new ByteArrayInputStream("<project/>".getBytes(StandardCharsets.UTF_8))),
+                "Adding the job should have thrown an exception during checkGoodName");
+        assertEquals(Messages.Hudson_TrailingDot(), e.getMessage());
+        assertThat(j.jenkins.getItems(), hasSize(0));
+    }
+
+    @Test
+    @Issue("SECURITY-2424")
+    void cannotCreateJobWithTrailingDot_withExistingJob() throws Exception {
+        assertThat(j.jenkins.getItems(), hasSize(0));
+        j.createFreeStyleProject("jobA");
+        assertThat(j.jenkins.getItems(), hasSize(1));
+        Failure e = assertThrows(
+                Failure.class,
+                () -> j.jenkins.createProjectFromXML("jobA.", new ByteArrayInputStream("<project/>".getBytes(StandardCharsets.UTF_8))),
+                "Adding the job should have thrown an exception during checkGoodName");
+        assertEquals(Messages.Hudson_TrailingDot(), e.getMessage());
+        assertThat(j.jenkins.getItems(), hasSize(1));
+    }
+
+    @Issue("SECURITY-2424")
+    @Test
+    void cannotCreateJobWithTrailingDot_exceptIfEscapeHatchIsSet() throws Exception {
+        String propName = Jenkins.NAME_VALIDATION_REJECTS_TRAILING_DOT_PROP;
+        String initialValue = System.getProperty(propName);
+        System.setProperty(propName, "false");
+        try {
+            assertThat(j.jenkins.getItems(), hasSize(0));
+            j.jenkins.createProjectFromXML("jobA.", new ByteArrayInputStream("<project/>".getBytes(StandardCharsets.UTF_8)));
+        }
+        finally {
+            if (initialValue == null) {
+                System.clearProperty(propName);
+            } else {
+                System.setProperty(propName, initialValue);
+            }
+        }
+        assertThat(j.jenkins.getItems(), hasSize(1));
+    }
+
+    private static File newFolder(File root, String... subDirs) throws IOException {
+        String subFolder = String.join("/", subDirs);
+        File result = new File(root, subFolder);
+        if (!result.mkdirs()) {
+            throw new IOException("Couldn't create folders " + root);
+        }
+        return result;
+    }
 }

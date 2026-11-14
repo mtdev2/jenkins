@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2016 CloudBees, Inc.
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,70 +21,116 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
 
-import javax.servlet.ServletContext;
-import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.MatcherAssert.assertThat;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
+import static org.hamcrest.Matchers.instanceOf;
 
+import jakarta.servlet.ServletContext;
+import java.io.File;
+import java.lang.reflect.Method;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.RegisterExtension;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.JenkinsSessionExtension;
 
 /**
  * Tests of the custom {@link UpdateCenter} implementation.
  */
-public class UpdateCenterCustomTest {
-    
-    @Rule
-    public final JenkinsRule j = new CustomUpdateCenterRule(CustomUpdateCenter.class);
-    
+class UpdateCenterCustomTest {
+
+    @RegisterExtension
+    private final JenkinsSessionExtension session = new CustomUpdateCenterExtension(CustomUpdateCenterExtension.CustomUpdateCenter.class);
+
     @Test
-    public void shouldStartupWithCustomUpdateCenter() throws Exception {
-        UpdateCenter uc = j.jenkins.getUpdateCenter();
-        assertThat("Update Center must be a custom instance", uc, instanceOf(CustomUpdateCenter.class));
+    void shouldStartupWithCustomUpdateCenter() throws Throwable {
+        session.then(j -> {
+            UpdateCenter uc = j.jenkins.getUpdateCenter();
+            assertThat("Update Center must be a custom instance", uc, instanceOf(CustomUpdateCenterExtension.CustomUpdateCenter.class));
+        });
     }
 
     // TODO: move to Jenkins Test Harness
-    private static final class CustomUpdateCenterRule extends JenkinsRule {
-        private final String updateCenterClassName;
-        private String _oldValue = null;
-        
-        private static final String PROPERTY_NAME = UpdateCenter.class.getName()+".className";
+    private static final class CustomUpdateCenterExtension extends JenkinsSessionExtension {
 
-        public CustomUpdateCenterRule(Class<?> ucClass) {
+        private int port;
+        private org.junit.runner.Description description;
+        private final String updateCenterClassName;
+
+        CustomUpdateCenterExtension(Class<?> ucClass) {
             this.updateCenterClassName = ucClass.getName();
         }
 
         @Override
-        protected ServletContext createWebServer() throws Exception {
-            _oldValue = System.getProperty(PROPERTY_NAME);
-            System.setProperty(PROPERTY_NAME, updateCenterClassName);
-            return super.createWebServer();
+        public void beforeEach(ExtensionContext context) {
+            super.beforeEach(context);
+            description = org.junit.runner.Description.createTestDescription(
+                    context.getTestClass().map(Class::getName).orElse(null),
+                    context.getTestMethod().map(Method::getName).orElse(null),
+                    context.getTestMethod().map(Method::getAnnotations).orElse(null));
         }
 
         @Override
-        public void after() throws Exception {
-            if (_oldValue != null) {
-                System.setProperty(PROPERTY_NAME, _oldValue);
+        public void then(Step s) throws Throwable {
+            CustomJenkinsRule r = new CustomJenkinsRule(updateCenterClassName, getHome(), port);
+            r.apply(
+                    new org.junit.runners.model.Statement() {
+                        @Override
+                        public void evaluate() throws Throwable {
+                            port = r.getPort();
+                            s.run(r);
+                        }
+                    },
+                    description
+            ).evaluate();
+        }
+
+        private static final class CustomJenkinsRule extends JenkinsRule {
+
+            private final String updateCenterClassName;
+            private String _oldValue = null;
+
+            private static final String PROPERTY_NAME = UpdateCenter.class.getName() + ".className";
+
+            CustomJenkinsRule(final String updateCenterClassName, File home, int port) {
+                this.updateCenterClassName = updateCenterClassName;
+                with(() -> home);
+                localPort = port;
+            }
+
+            int getPort() {
+                return localPort;
+            }
+
+            @Override
+            protected ServletContext createWebServer2() throws Exception {
+                _oldValue = System.getProperty(PROPERTY_NAME);
+                System.setProperty(PROPERTY_NAME, updateCenterClassName);
+                return super.createWebServer2();
+            }
+
+            @Override
+            public void after() {
+                if (_oldValue != null) {
+                    System.setProperty(PROPERTY_NAME, _oldValue);
+                }
             }
         }
 
-        public String getUpdateCenterClassName() {
-            return updateCenterClassName;
-        }
-    }
-    
-    public static final class CustomUpdateCenter extends UpdateCenter {
+        public static final class CustomUpdateCenter extends UpdateCenter {
 
-        public CustomUpdateCenter() {
-            super();
+            @SuppressWarnings("checkstyle:redundantmodifier")
+            public CustomUpdateCenter() {
+            }
+
+            @SuppressWarnings("checkstyle:redundantmodifier")
+            public CustomUpdateCenter(UpdateCenterConfiguration config) {
+                super(config);
+            }
+
         }
-        
-        public CustomUpdateCenter(UpdateCenterConfiguration config) {
-            super(config);
-        }
-        
     }
 }

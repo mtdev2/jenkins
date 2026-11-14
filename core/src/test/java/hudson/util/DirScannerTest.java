@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2011, Christoph Thelen
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,80 +21,84 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.FilePath;
 import java.io.File;
-import java.io.IOException;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * @author Christoph Thelen
  */
-public class DirScannerTest {
+class DirScannerTest {
 
-    @Rule public TemporaryFolder tmpRule = new TemporaryFolder();
+    @TempDir
+    private File tmpRule;
 
-    @Test public void globShouldUseDefaultExcludes() throws Exception {
-        FilePath tmp = new FilePath(tmpRule.getRoot());
+    @Test
+    void globShouldUseDefaultExcludes() throws Exception {
+        FilePath tmp = new FilePath(tmpRule);
         try {
             tmp.child(".gitignore").touch(0);
             FilePath git = tmp.child(".git");
             git.mkdirs();
             git.child("HEAD").touch(0);
-            
+
             DirScanner glob1 = new DirScanner.Glob("**/*", null);
             DirScanner glob2 = new DirScanner.Glob("**/*", null, true);
             MatchingFileVisitor gitdir = new MatchingFileVisitor("HEAD");
             MatchingFileVisitor gitignore = new MatchingFileVisitor(".gitignore");
-            
+
             glob1.scan(new File(tmp.getRemote()), gitdir);
             glob2.scan(new File(tmp.getRemote()), gitignore);
-            
+
             assertFalse(gitdir.found);
             assertFalse(gitignore.found);
         } finally {
             tmp.deleteRecursive();
         }
     }
-    
-    @Test public void globShouldIgnoreDefaultExcludesByRequest() throws Exception {
-        FilePath tmp = new FilePath(tmpRule.getRoot());
+
+    @Test
+    void globShouldIgnoreDefaultExcludesByRequest() throws Exception {
+        FilePath tmp = new FilePath(tmpRule);
         try {
             tmp.child(".gitignore").touch(0);
             FilePath git = tmp.child(".git");
             git.mkdirs();
             git.child("HEAD").touch(0);
-            
+
             DirScanner glob = new DirScanner.Glob("**/*", null, false);
             MatchingFileVisitor gitdir = new MatchingFileVisitor("HEAD");
             MatchingFileVisitor gitignore = new MatchingFileVisitor(".gitignore");
-            
+
             glob.scan(new File(tmp.getRemote()), gitdir);
             glob.scan(new File(tmp.getRemote()), gitignore);
-            
+
             assertTrue(gitdir.found);
             assertTrue(gitignore.found);
         } finally {
             tmp.deleteRecursive();
         }
     }
-    
+
     private static class MatchingFileVisitor extends FileVisitor {
-    
+
         public boolean found = false;
-        
+
         public final String filename;
-        
-        public MatchingFileVisitor(String filename) {
+
+        MatchingFileVisitor(String filename) {
             this.filename = filename;
         }
-    
-        public void visit(File f, String relativePath) throws IOException {
+
+        @Override
+        public void visit(File f, String relativePath) {
             if (relativePath.endsWith(filename)) {
                 found = true;
             }

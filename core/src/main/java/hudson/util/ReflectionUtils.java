@@ -21,11 +21,11 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
-import org.apache.commons.beanutils.PropertyUtils;
-import org.kohsuke.stapler.ClassDescriptor;
-
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.beans.PropertyDescriptor;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.AnnotatedElement;
@@ -37,7 +37,8 @@ import java.util.AbstractList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
+import org.apache.commons.beanutils.PropertyUtils;
+import org.kohsuke.stapler.ClassDescriptor;
 
 /**
  * Utility code for reflection.
@@ -45,13 +46,14 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
  * @author Kohsuke Kawaguchi
  * @since 1.351
  */
+@SuppressFBWarnings(value = "NM_SAME_SIMPLE_NAME_AS_SUPERCLASS", justification = "Used for backward compatibility and extending utility classes")
 public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
     /**
      * Finds a public method of the given name, regardless of its parameter definitions,
      */
     public static Method getPublicMethodNamed(Class c, String methodName) {
-        for( Method m : c.getMethods() )
-            if(m.getName().equals(methodName))
+        for (Method m : c.getMethods())
+            if (m.getName().equals(methodName))
                 return m;
         return null;
     }
@@ -65,13 +67,13 @@ public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
 
     public static Object getPublicProperty(Object o, String p) throws InvocationTargetException, NoSuchMethodException, IllegalAccessException {
         PropertyDescriptor pd = PropertyUtils.getPropertyDescriptor(o, p);
-        if(pd==null) {
+        if (pd == null) {
             // field?
             try {
                 Field f = o.getClass().getField(p);
                 return f.get(o);
             } catch (NoSuchFieldException e) {
-                throw new IllegalArgumentException("No such property "+p+" on "+o.getClass());
+                throw new IllegalArgumentException("No such property " + p + " on " + o.getClass(), e);
             }
         } else {
             return PropertyUtils.getProperty(o, p);
@@ -97,7 +99,7 @@ public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
 
         @Override
         public Parameter get(int index) {
-            return new Parameter(this,index);
+            return new Parameter(this, index);
         }
 
         @Override
@@ -106,19 +108,19 @@ public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
         }
 
         public Type[] genericTypes() {
-            if (genericTypes==null)
+            if (genericTypes == null)
                 genericTypes = method.getGenericParameterTypes();
             return genericTypes;
         }
 
         public Annotation[][] annotations() {
-            if (annotations==null)
+            if (annotations == null)
                 annotations = method.getParameterAnnotations();
             return annotations;
         }
 
         public String[] names() {
-            if (names==null)
+            if (names == null)
                 names = ClassDescriptor.loadParameterNames(method);
             return names;
         }
@@ -166,7 +168,7 @@ public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
          */
         public <A extends Annotation> A annotation(Class<A> type) {
             for (Annotation a : annotations())
-                if (a.annotationType()==type)
+                if (a.annotationType() == type)
                     return type.cast(a);
             return null;
         }
@@ -178,14 +180,14 @@ public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
          */
         public String name() {
             String[] names = parent.names();
-            if (index<names.length)
+            if (index < names.length)
                 return names[index];
             return null;
         }
 
         @Override
         public boolean isAnnotationPresent(Class<? extends Annotation> type) {
-            return annotation(type)!=null;
+            return annotation(type) != null;
         }
 
         @Override
@@ -214,6 +216,7 @@ public class ReflectionUtils extends org.springframework.util.ReflectionUtils {
 
     // TODO the version in org.kohsuke.stapler is incomplete
     private static final Map<Class<?>, Object> defaultPrimitiveValue = new HashMap<>();
+
     static {
         defaultPrimitiveValue.put(boolean.class, false);
         defaultPrimitiveValue.put(char.class, '\0');

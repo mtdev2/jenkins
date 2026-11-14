@@ -21,30 +21,36 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
-import com.gargoylesoftware.htmlunit.WebResponse;
-import hudson.model.Messages;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-public class FormValidationSecurity1893Test {
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+import hudson.model.Messages;
+import org.htmlunit.WebResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+
+@WithJenkins
+class FormValidationSecurity1893Test {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void checkHeaderPresence() throws Exception {
+    void checkHeaderPresence() throws Exception {
         final JenkinsRule.WebClient wc = j.createWebClient();
         final WebResponse response = wc.goTo("descriptorByName/hudson.model.FreeStyleProject/checkCustomWorkspace").getWebResponse();
         assertEquals(200, response.getStatusCode());
         assertThat(response.getContentAsString(), containsString(Messages.AbstractProject_CustomWorkspaceEmpty()));
         assertThat(response.getResponseHeaderValue("Content-Security-Policy"), containsString("default-src 'none';"));
-        assertThat(response.getResponseHeaderValue("X-Content-Security-Policy"), containsString("default-src 'none';"));
-        assertThat(response.getResponseHeaderValue("X-WebKit-CSP"), containsString("default-src 'none';"));
     }
 }

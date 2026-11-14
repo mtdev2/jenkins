@@ -21,25 +21,27 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security.stapler;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+
 import com.cloudbees.hudson.plugins.folder.Folder;
+import hudson.AboutJenkins;
 import hudson.model.TopLevelItem;
-import hudson.model.View;
+import java.awt.Point;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import jenkins.model.Jenkins;
-import org.junit.Test;
+import org.apache.commons.codec.Encoder;
+import org.apache.commons.codec.binary.Base64;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.For;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.TestExtension;
-
-import java.awt.*;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import static org.junit.Assert.assertFalse;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * To check the previous behavior you can use:
@@ -50,17 +52,22 @@ import static org.junit.Assert.assertFalse;
  */
 @Issue("SECURITY-400")
 @For(TypedFilter.class)
-public class GetterMethodFilterTest extends StaplerAbstractTest {
-    
+@WithJenkins
+class GetterMethodFilterTest extends StaplerAbstractTest {
+
     @TestExtension
     public static class TestWithReturnJavaPlatformObject extends AbstractUnprotectedRootAction {
         public static boolean called = false;
-        
-        public String getString() { return "a";}
-        
+
+        public String getString() {
+            return "a";
+        }
+
         // cannot provide side-effect since the String has no side-effect methods
-        public Object getObjectString() { return "a";}
-        
+        public Object getObjectString() {
+            return "a";
+        }
+
         // but it opens wide range of potentially dangerous classes
         public Object getObjectCustom() {
             return new Object() {
@@ -70,9 +77,11 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
                 }
             };
         }
-        
-        public Point getPoint() { return new Point(1, 2);}
-        
+
+        public Point getPoint() {
+            return new Point(1, 2);
+        }
+
         public Point getPointCustomChild() {
             return new Point() {
                 // in order to provide a web entry-point
@@ -81,7 +90,7 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
                 }
             };
         }
-        
+
         public Point getPointWithListener() {
             return new Point() {
                 @Override
@@ -93,108 +102,113 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
             };
         }
     }
-    
+
     @Test
-    public void testWithReturnJavaPlatformObject_string() throws Exception {
+    void testWithReturnJavaPlatformObject_string() {
         assertNotReachable("testWithReturnJavaPlatformObject/string/");
     }
-    
+
     @Test
-    public void testWithReturnJavaPlatformObject_objectString() throws Exception {
+    void testWithReturnJavaPlatformObject_objectString() {
         assertNotReachable("testWithReturnJavaPlatformObject/objectString/");
     }
-    
+
     @Test
-    public void testWithReturnJavaPlatformObject_objectCustom() throws Exception {
+    void testWithReturnJavaPlatformObject_objectCustom() {
         assertNotReachable("testWithReturnJavaPlatformObject/objectCustom/");
     }
-    
+
     @Test
-    public void testWithReturnJavaPlatformObject_point() throws Exception {
+    void testWithReturnJavaPlatformObject_point() {
         assertNotReachable("testWithReturnJavaPlatformObject/point/");
     }
-    
+
     // previously reachable and so potentially open to future security vulnerability
     @Test
-    public void testWithReturnJavaPlatformObject_pointCustomChild() throws Exception {
+    void testWithReturnJavaPlatformObject_pointCustomChild() {
         assertNotReachable("testWithReturnJavaPlatformObject/pointCustomChild/");
     }
-    
+
     @Test
-    public void testWithReturnJavaPlatformObject_pointWithListener() throws Exception {
+    void testWithReturnJavaPlatformObject_pointWithListener() {
         TestWithReturnJavaPlatformObject.called = false;
         assertFalse(TestWithReturnJavaPlatformObject.called);
         // could potentially trigger some side-effects
         assertNotReachable("testWithReturnJavaPlatformObject/pointWithListener/x/");
         assertFalse(TestWithReturnJavaPlatformObject.called);
     }
-    
+
     @TestExtension
     public static class TestWithReturnMultiple extends AbstractUnprotectedRootAction {
         public List<Renderable> getList() {
             return Arrays.asList(new Renderable(), new Renderable());
         }
-        
+
         // as we cannot determine the element class due to type erasure, this is reachable
         public List<? extends Point> getListOfPoint() {
-            return Collections.singletonList(new RenderablePoint());
+            return List.of(new RenderablePoint());
         }
 
         public List<List<Renderable>> getListOfList() {
-            return Collections.singletonList(Arrays.asList(new Renderable(), new Renderable()));
+            return List.of(Arrays.asList(new Renderable(), new Renderable()));
         }
 
-        public Renderable[] getArray() { return new Renderable[]{new Renderable(), new Renderable()};}
-        
-        // will not be accepted since the componentType is from JVM	
+        public Renderable[] getArray() {
+            return new Renderable[]{new Renderable(), new Renderable()};
+        }
+
+        // will not be accepted since the componentType is from JVM
         public Point[] getArrayOfPoint() {
             return new Point[]{new Point() {
-                public void doIndex() {replyOk();}
-            }};
+                public void doIndex() {
+                    replyOk();
+                }
+            } };
         }
-        
+
         public Renderable[][] getArrayOfArray() {
-            return new Renderable[][]{
-                    new Renderable[]{new Renderable(), new Renderable()}
+            return new Renderable[][] {
+                new Renderable[] {
+                    new Renderable(),
+                    new Renderable(),
+                },
             };
         }
-        
+
         @SuppressWarnings("unchecked")
         public List<Renderable>[] getArrayOfList() {
             List<Renderable> list = Arrays.asList(new Renderable(), new Renderable());
-            return (List<Renderable>[]) Collections.singletonList(list).toArray(new List[0]);
+            return (List<Renderable>[]) List.of(list).toArray(new List[0]);
         }
-        
+
         public List<Renderable[]> getListOfArray() {
             return Collections.singletonList(
                     new Renderable[]{new Renderable(), new Renderable()}
             );
         }
-        
+
         public Map<String, Renderable> getMap() {
-            return new HashMap<String, Renderable>() {{
-                put("a", new Renderable());
-            }};
+            return Map.of("a", new Renderable());
         }
     }
-    
+
     @Test
-    public void testWithReturnMultiple_list() throws Exception {
+    void testWithReturnMultiple_list() {
         assertNotReachable("testWithReturnMultiple/list/");
         assertNotReachable("testWithReturnMultiple/list/0/");
         assertNotReachable("testWithReturnMultiple/list/1/");
         assertNotReachable("testWithReturnMultiple/list/2/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_listOfPoint() throws Exception {
+    void testWithReturnMultiple_listOfPoint() {
         assertNotReachable("testWithReturnMultiple/listOfPoint/");
         assertNotReachable("testWithReturnMultiple/listOfPoint/0/");
         assertNotReachable("testWithReturnMultiple/listOfPoint/1/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_listOfList() throws Exception {
+    void testWithReturnMultiple_listOfList() {
         assertNotReachable("testWithReturnMultiple/listOfList/");
         assertNotReachable("testWithReturnMultiple/listOfList/0/");
         assertNotReachable("testWithReturnMultiple/listOfList/1/");
@@ -202,24 +216,24 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
         assertNotReachable("testWithReturnMultiple/listOfList/0/1/");
         assertNotReachable("testWithReturnMultiple/listOfList/0/2/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_array() throws Exception {
+    void testWithReturnMultiple_array() throws Exception {
         assertNotReachable("testWithReturnMultiple/array/");
         assertReachable("testWithReturnMultiple/array/0/");
         assertReachable("testWithReturnMultiple/array/1/");
         assertNotReachable("testWithReturnMultiple/array/2/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_arrayOfPoint() throws Exception {
+    void testWithReturnMultiple_arrayOfPoint() {
         assertNotReachable("testWithReturnMultiple/arrayOfPoint/");
         assertNotReachable("testWithReturnMultiple/arrayOfPoint/0/");
         assertNotReachable("testWithReturnMultiple/arrayOfPoint/1/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_arrayOfArray() throws Exception {
+    void testWithReturnMultiple_arrayOfArray() throws Exception {
         assertNotReachable("testWithReturnMultiple/arrayOfArray/");
         assertNotReachable("testWithReturnMultiple/arrayOfArray/0/");
         assertNotReachable("testWithReturnMultiple/arrayOfArray/1/");
@@ -227,9 +241,9 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
         assertReachable("testWithReturnMultiple/arrayOfArray/0/1/");
         assertNotReachable("testWithReturnMultiple/arrayOfArray/0/2/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_arrayOfList() throws Exception {
+    void testWithReturnMultiple_arrayOfList() {
         assertNotReachable("testWithReturnMultiple/arrayOfList/");
         assertNotReachable("testWithReturnMultiple/arrayOfList/0/");
         assertNotReachable("testWithReturnMultiple/arrayOfList/1/");
@@ -237,9 +251,9 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
         assertNotReachable("testWithReturnMultiple/arrayOfList/0/1/");
         assertNotReachable("testWithReturnMultiple/arrayOfList/0/2/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_listOfArray() throws Exception {
+    void testWithReturnMultiple_listOfArray() {
         assertNotReachable("testWithReturnMultiple/listOfArray/");
         assertNotReachable("testWithReturnMultiple/listOfArray/0/");
         assertNotReachable("testWithReturnMultiple/listOfArray/1/");
@@ -247,65 +261,65 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
         assertNotReachable("testWithReturnMultiple/listOfArray/0/1/");
         assertNotReachable("testWithReturnMultiple/listOfArray/0/2/");
     }
-    
+
     @Test
-    public void testWithReturnMultiple_map() throws Exception {
+    void testWithReturnMultiple_map() {
         assertNotReachable("testWithReturnMultiple/map/");
         assertNotReachable("testWithReturnMultiple/map/a/");
         assertNotReachable("testWithReturnMultiple/map/b/");
     }
-    
+
     @TestExtension
     public static class TestWithReturnCoreObject extends AbstractUnprotectedRootAction {
-        public View.People getPeople() {
+        public AboutJenkins getPeople() {
             // provide an index jelly view
-            return new View.People(Jenkins.get());
+            return new AboutJenkins();
         }
     }
-    
+
     @Test
-    public void testWithReturnCoreObject_people() throws Exception {
+    void testWithReturnCoreObject_people() throws Exception {
         assertReachableWithoutOk("testWithReturnCoreObject/people/");
     }
 
     @Test
-    public void testTopLevelItemIsLegal() throws Exception {
+    void testTopLevelItemIsLegal() throws Exception {
         TopLevelItem item = j.createFreeStyleProject();
         assertReachableWithoutOk("job/" + item.getName());
     }
-    
+
     @TestExtension
     public static class TestWithReturnPluginObject extends AbstractUnprotectedRootAction {
         public Folder getFolder() {
             return new Folder(Jenkins.get(), "testFolder");
         }
     }
-    
+
     @Test
-    public void testWithReturnPluginObject_folder() throws Exception {
+    void testWithReturnPluginObject_folder() throws Exception {
         // the search part is just to get something from the call
         assertReachableWithoutOk("testWithReturnPluginObject/folder/search/suggest/?query=xxx");
     }
-    
+
     // full package name just to be explicit
     @TestExtension
     public static class TestWithReturnThirdPartyObject extends AbstractUnprotectedRootAction {
-        public org.apache.commons.codec.binary.Base64 getBase64() {
-            return new org.apache.commons.codec.binary.Base64();
+        public Base64 getBase64() {
+            return new Base64();
         }
-        
-        public org.apache.commons.codec.Encoder getEncoder() {
-            return new org.apache.commons.codec.binary.Base64();
+
+        public Encoder getEncoder() {
+            return new Base64();
         }
-        
-        public org.apache.commons.codec.Encoder getEncoderCustomChild() {
-            return new org.apache.commons.codec.Encoder() {
+
+        public Encoder getEncoderCustomChild() {
+            return new Encoder() {
                 @Override
-                public Object encode(Object source) throws org.apache.commons.codec.EncoderException {
+                public Object encode(Object source) {
                     // it's not about implementation...
                     return null;
                 }
-                
+
                 public void doIndex() {
                     // it's about sending a message
                     replyOk();
@@ -313,187 +327,223 @@ public class GetterMethodFilterTest extends StaplerAbstractTest {
             };
         }
     }
-    
+
     // the class itself was reachable but no more interaction are available and so return 404
-    
+
     @Test
-    public void testWithReturnThirdPartyObject_base32() throws Exception {
+    void testWithReturnThirdPartyObject_base32() {
         assertNotReachable("testWithReturnThirdPartyObject/base32/");
     }
-    
+
     // the class itself was reachable but no more interaction are available and so return 404,
     // in case there is some callable methods, we could create some side-effect even we got 404
     @Test
-    public void testWithReturnThirdPartyObject_encoder() throws Exception {
+    void testWithReturnThirdPartyObject_encoder() {
         assertNotReachable("testWithReturnThirdPartyObject/encoder/");
     }
-    
+
     // as we add a entry-point in the class, now it can propose some interaction,
-    // dangerous behavior that is not prohibited	
+    // dangerous behavior that is not prohibited
     @Test
-    public void testWithReturnThirdPartyObject_encoderCustomChild() throws Exception {
+    void testWithReturnThirdPartyObject_encoderCustomChild() {
         assertNotReachable("testWithReturnThirdPartyObject/encoderCustomChild/");
     }
-    
-    
+
+
     //================================= getter methods with primitives =================================
-    
+
     @TestExtension
     public static class TestWithReturnPrimitives extends AbstractUnprotectedRootAction {
-        public int getInteger() { return 1;}
-        
-        public Integer getIntegerObject() { return 1;}
-        
-        public long getLong() { return 1L;}
-        
-        public Long getLongObject() { return 1L;}
-        
-        public short getShort() { return (short) 1;}
-        
-        public Short getShortObject() { return 1;}
-        
-        public byte getByte() { return (byte) 1;}
-        
-        public Byte getByteObject() { return (byte) 1;}
-        
-        public boolean getBoolean() { return true;}
-        
-        public Boolean getBooleanObject() { return Boolean.TRUE;}
-        
-        public char getChar() { return 'a';}
-        
-        public Character getCharObject() { return 'a';}
-        
-        public float getFloat() { return 1.0f;}
-        
-        public Float getFloatObject() { return 1.0f;}
-        
-        public double getDouble() { return 1.0;}
-        
-        public Double getDoubleObject() { return 1.0;}
-        
+        public int getInteger() {
+            return 1;
+        }
+
+        public Integer getIntegerObject() {
+            return 1;
+        }
+
+        public long getLong() {
+            return 1L;
+        }
+
+        public Long getLongObject() {
+            return 1L;
+        }
+
+        public short getShort() {
+            return (short) 1;
+        }
+
+        public Short getShortObject() {
+            return 1;
+        }
+
+        public byte getByte() {
+            return (byte) 1;
+        }
+
+        public Byte getByteObject() {
+            return (byte) 1;
+        }
+
+        public boolean getBoolean() {
+            return true;
+        }
+
+        public Boolean getBooleanObject() {
+            return Boolean.TRUE;
+        }
+
+        public char getChar() {
+            return 'a';
+        }
+
+        public Character getCharObject() {
+            return 'a';
+        }
+
+        public float getFloat() {
+            return 1.0f;
+        }
+
+        public Float getFloatObject() {
+            return 1.0f;
+        }
+
+        public double getDouble() {
+            return 1.0;
+        }
+
+        public Double getDoubleObject() {
+            return 1.0;
+        }
+
         public void getVoid() { }
-        
-        public Void getVoidObject() { return null; }
+
+        public Void getVoidObject() {
+            return null;
+        }
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_integer() throws Exception {
+    void testTestWithReturnPrimitives_integer() {
         assertNotReachable("testWithReturnPrimitives/integer/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_integerObject() throws Exception {
+    void testTestWithReturnPrimitives_integerObject() {
         assertNotReachable("testWithReturnPrimitives/integerObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_long() throws Exception {
+    void testTestWithReturnPrimitives_long() {
         assertNotReachable("testWithReturnPrimitives/long/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_longObject() throws Exception {
+    void testTestWithReturnPrimitives_longObject() {
         assertNotReachable("testWithReturnPrimitives/longObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_short() throws Exception {
+    void testTestWithReturnPrimitives_short() {
         assertNotReachable("testWithReturnPrimitives/short/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_shortObject() throws Exception {
+    void testTestWithReturnPrimitives_shortObject() {
         assertNotReachable("testWithReturnPrimitives/shortObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_byte() throws Exception {
+    void testTestWithReturnPrimitives_byte() {
         assertNotReachable("testWithReturnPrimitives/byte/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_byteObject() throws Exception {
+    void testTestWithReturnPrimitives_byteObject() {
         assertNotReachable("testWithReturnPrimitives/byteObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_boolean() throws Exception {
+    void testTestWithReturnPrimitives_boolean() {
         assertNotReachable("testWithReturnPrimitives/boolean/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_booleanObject() throws Exception {
+    void testTestWithReturnPrimitives_booleanObject() {
         assertNotReachable("testWithReturnPrimitives/booleanObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_char() throws Exception {
+    void testTestWithReturnPrimitives_char() {
         assertNotReachable("testWithReturnPrimitives/char/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_charObject() throws Exception {
+    void testTestWithReturnPrimitives_charObject() {
         assertNotReachable("testWithReturnPrimitives/charObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_float() throws Exception {
+    void testTestWithReturnPrimitives_float() {
         assertNotReachable("testWithReturnPrimitives/float/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_floatObject() throws Exception {
+    void testTestWithReturnPrimitives_floatObject() {
         assertNotReachable("testWithReturnPrimitives/floatObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_double() throws Exception {
+    void testTestWithReturnPrimitives_double() {
         assertNotReachable("testWithReturnPrimitives/double/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_doubleObject() throws Exception {
+    void testTestWithReturnPrimitives_doubleObject() {
         assertNotReachable("testWithReturnPrimitives/doubleObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_void() throws Exception {
+    void testTestWithReturnPrimitives_void() {
         assertNotReachable("testWithReturnPrimitives/void/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     @Test
-    public void testTestWithReturnPrimitives_voidObject() throws Exception {
+    void testTestWithReturnPrimitives_voidObject() {
         assertNotReachable("testWithReturnPrimitives/voidObject/");
         assertGetMethodRequestWasBlockedAndResetFlag();
     }
-    
+
     //================================= getter methods =================================
-    
+
     @TestExtension
     public static class TestWithReturnWithinStaplerScope extends DoActionFilterTest.AbstractUnprotectedRootAction {
-        public Renderable getRenderable() { return new Renderable();}
+        public Renderable getRenderable() {
+            return new Renderable();
+        }
     }
-    
+
     @Test
-    public void testWithReturnWithinStaplerScope_renderable() throws Exception {
+    void testWithReturnWithinStaplerScope_renderable() throws Exception {
         assertReachable("testWithReturnWithinStaplerScope/renderable/");
         assertReachable("testWithReturnWithinStaplerScope/renderable/valid/");
     }

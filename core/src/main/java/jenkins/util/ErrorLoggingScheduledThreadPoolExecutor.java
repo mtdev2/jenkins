@@ -54,15 +54,14 @@ class ErrorLoggingScheduledThreadPoolExecutor extends ScheduledThreadPoolExecuto
     ErrorLoggingScheduledThreadPoolExecutor(int corePoolSize, RejectedExecutionHandler handler) {
         super(corePoolSize, handler);
     }
-    
+
     ErrorLoggingScheduledThreadPoolExecutor(int corePoolSize, ThreadFactory threadFactory, RejectedExecutionHandler handler) {
         super(corePoolSize, threadFactory, handler);
     }
-    
+
     @Override protected void afterExecute(Runnable r, Throwable t) {
         super.afterExecute(r, t);
-        if (t == null && r instanceof Future<?>) {
-            Future<?> f = (Future<?>) r;
+        if (t == null && r instanceof Future<?> f) {
             if (f.isDone()) { // TODO super Javadoc does not suggest this, but without it, we hang in FutureTask.awaitDone!
                 try {
                     f.get(/* just to be on the safe side, do not wait */0, TimeUnit.NANOSECONDS);

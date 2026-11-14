@@ -24,6 +24,9 @@
 
 package jenkins.util.io;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.Functions;
+import hudson.Util;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -39,15 +42,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
-import edu.umd.cs.findbugs.annotations.NonNull;
-
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import hudson.Functions;
-import hudson.Util;
 
 @Restricted(NoExternalUse.class)
 public class PathRemover {
@@ -75,7 +71,7 @@ public class PathRemover {
     public void forceRemoveFile(@NonNull Path path) throws IOException {
         for (int retryAttempts = 0; ; retryAttempts++) {
             Optional<IOException> maybeError = tryRemoveFile(path);
-            if (!maybeError.isPresent()) return;
+            if (maybeError.isEmpty()) return;
             if (retryStrategy.shouldRetry(retryAttempts)) continue;
             IOException error = maybeError.get();
             throw new IOException(retryStrategy.failureMessage(path, retryAttempts), error);
@@ -138,8 +134,6 @@ public class PathRemover {
             this.waitBetweenRetries = waitBetweenRetries;
         }
 
-        @SuppressFBWarnings(value = "DM_GC", justification = "Garbage collection happens only when "
-                + "GC_AFTER_FAILED_DELETE is true. It's an experimental feature in Jenkins.")
         private void gcIfEnabled() {
             /* If the Jenkins process had the file open earlier, and it has not
              * closed it then Windows won't let us delete it until the Java object
@@ -172,7 +166,7 @@ public class PathRemover {
             sb.append("'. Tried ");
             sb.append(retryCount + 1);
             sb.append(" time");
-            if (retryCount != 1) sb.append('s');
+            if (retryCount + 1 != 1) sb.append('s');
             if (maxRetries > 0) {
                 sb.append(" (of a maximum of ");
                 sb.append(maxRetries + 1);

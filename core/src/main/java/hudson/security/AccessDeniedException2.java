@@ -1,11 +1,11 @@
 package hudson.security;
 
+import io.jenkins.servlet.http.HttpServletResponseWrapper;
+import java.io.PrintWriter;
+import javax.servlet.http.HttpServletResponse;
+import jenkins.util.SystemProperties;
 import org.acegisecurity.AccessDeniedException;
 import org.acegisecurity.Authentication;
-
-import javax.servlet.http.HttpServletResponse;
-import java.io.PrintWriter;
-import jenkins.util.SystemProperties;
 
 /**
  * {@link AccessDeniedException} with more information.
@@ -29,12 +29,12 @@ public class AccessDeniedException2 extends AccessDeniedException {
     public final Permission permission;
 
     public AccessDeniedException2(Authentication authentication, Permission permission) {
-        this(null,authentication,permission);
+        this(null, authentication, permission);
     }
 
     public AccessDeniedException2(Throwable t, Authentication authentication, Permission permission) {
         super(Messages.AccessDeniedException2_MissingPermission(authentication.getName(),
-                permission.group.title+"/"+permission.name), t);
+                permission.group.title + "/" + permission.name), t);
         this.authentication = authentication;
         this.permission = permission;
     }
@@ -43,7 +43,7 @@ public class AccessDeniedException2 extends AccessDeniedException {
      * Reports the details of the access failure in HTTP headers to assist diagnosis.
      */
     public void reportAsHeaders(HttpServletResponse rsp) {
-        toSpring().reportAsHeaders(rsp);
+        toSpring().reportAsHeaders(HttpServletResponseWrapper.toJakartaHttpServletResponse(rsp));
     }
 
     /**

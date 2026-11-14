@@ -21,61 +21,68 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security.apitoken;
 
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.Page;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import com.gargoylesoftware.htmlunit.html.HtmlSpan;
-import com.gargoylesoftware.htmlunit.util.NameValuePair;
-import com.gargoylesoftware.htmlunit.xml.XmlPage;
-import hudson.model.User;
-import jenkins.security.ApiTokenProperty;
-import net.sf.json.JSONObject;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.JenkinsRule.WebClient;
-
-import java.net.URL;
-import java.util.Collections;
-
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.xml.HasXPath.hasXPath;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-public class ApiTokenStatsTest {
-    
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-    
+import hudson.model.User;
+import java.net.URI;
+import java.net.URL;
+import java.util.List;
+import jenkins.security.ApiTokenProperty;
+import net.sf.json.JSONObject;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.Page;
+import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlPage;
+import org.htmlunit.html.HtmlSpan;
+import org.htmlunit.util.NameValuePair;
+import org.htmlunit.xml.XmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.JenkinsRule.WebClient;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+
+@WithJenkins
+class ApiTokenStatsTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
     @Test
-    public void roundtrip() throws Exception {
+    void roundtrip() throws Exception {
         j.jenkins.setCrumbIssuer(null);
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         User u = User.getById("foo", true);
-        
+
         ApiTokenProperty t = u.getProperty(ApiTokenProperty.class);
         assertNotNull(t.getTokenStore());
         assertNotNull(t.getTokenStats());
-        
+
         // test the authentication via Token
         WebClient wc = j.createWebClient()
                 .withBasicCredentials(u.getId())
                 .withThrowExceptionOnFailingStatusCode(false);
-        
+
         final String TOKEN_NAME = "New Token Name";
-        
-        WebRequest request = new WebRequest(new URL(j.getURL() + "user/" + u.getId() + "/descriptorByName/" + ApiTokenProperty.class.getName() + "/generateNewToken"), HttpMethod.POST);
-        request.setRequestParameters(Collections.singletonList(new NameValuePair("newTokenName", TOKEN_NAME)));
-        
+
+        WebRequest request = new WebRequest(new URI(j.getURL() + "user/" + u.getId() + "/descriptorByName/" + ApiTokenProperty.class.getName() + "/generateNewToken").toURL(), HttpMethod.POST);
+        request.setRequestParameters(List.of(new NameValuePair("newTokenName", TOKEN_NAME)));
+
         Page page = wc.getPage(request);
         assertEquals(200, page.getWebResponse().getStatusCode());
         String responseContent = page.getWebResponse().getContentAsString();
@@ -84,39 +91,39 @@ public class ApiTokenStatsTest {
         String tokenName = jsonData.getString("tokenName");
         String tokenValue = jsonData.getString("tokenValue");
         String tokenUuid = jsonData.getString("tokenUuid");
-        
+
         assertEquals(TOKEN_NAME, tokenName);
-        
+
         WebClient restWc = j.createWebClient().withBasicCredentials(u.getId(), tokenValue);
         checkUserIsConnected(restWc, u.getId());
-        
-        HtmlPage config = wc.goTo(u.getUrl() + "/configure");
+
+        HtmlPage config = wc.goTo(u.getUrl() + "/security/");
         assertEquals(200, config.getWebResponse().getStatusCode());
         assertThat(config.getWebResponse().getContentAsString(), containsString(tokenUuid));
         assertThat(config.getWebResponse().getContentAsString(), containsString(tokenName));
-        
+
         final int NUM_CALL_WITH_TOKEN = 5;
         // one is already done with checkUserIsConnected
         for (int i = 1; i < NUM_CALL_WITH_TOKEN; i++) {
             restWc.goToXml("whoAmI/api/xml");
         }
-        
-        HtmlPage configWithStats = wc.goTo(u.getUrl() + "/configure");
+
+        HtmlPage configWithStats = wc.goTo(u.getUrl() + "/security/");
         assertEquals(200, configWithStats.getWebResponse().getStatusCode());
         HtmlSpan useCounterSpan = configWithStats.getDocumentElement().getOneHtmlElementByAttribute("span", "class", "token-use-counter");
         assertThat(useCounterSpan.getTextContent(), containsString("" + NUM_CALL_WITH_TOKEN));
-        
+
         revokeToken(wc, u.getId(), tokenUuid);
-        
+
         // token is no more valid
         checkUserIsNotConnected(restWc);
-        
-        HtmlPage configWithoutToken = wc.goTo(u.getUrl() + "/configure");
+
+        HtmlPage configWithoutToken = wc.goTo(u.getUrl() + "/security/");
         assertEquals(200, configWithoutToken.getWebResponse().getStatusCode());
         assertThat(configWithoutToken.getWebResponse().getContentAsString(), not(containsString(tokenUuid)));
         assertThat(configWithoutToken.getWebResponse().getContentAsString(), not(containsString(tokenName)));
     }
-    
+
     private void checkUserIsConnected(WebClient wc, String username) throws Exception {
         XmlPage xmlPage = wc.goToXml("whoAmI/api/xml");
         assertThat(xmlPage, hasXPath("//name", is(username)));
@@ -124,16 +131,12 @@ public class ApiTokenStatsTest {
         assertThat(xmlPage, hasXPath("//authenticated", is("true")));
         assertThat(xmlPage, hasXPath("//authority", is("authenticated")));
     }
-    
-    private void checkUserIsNotConnected(WebClient wc) throws Exception {
-        try {
-            wc.goToXml("whoAmI/api/xml");
-            fail();
-        } catch (FailingHttpStatusCodeException e) {
-            assertEquals(401, e.getStatusCode());
-        }
+
+    private void checkUserIsNotConnected(WebClient wc) {
+        FailingHttpStatusCodeException e = assertThrows(FailingHttpStatusCodeException.class, () -> wc.goToXml("whoAmI/api/xml"));
+        assertEquals(401, e.getStatusCode());
     }
-    
+
     private void revokeToken(WebClient wc, String login, String tokenUuid) throws Exception {
         WebRequest request = new WebRequest(
                 new URL(j.getURL(), "user/" + login + "/descriptorByName/" + ApiTokenProperty.class.getName() + "/revoke/?tokenUuid=" + tokenUuid),

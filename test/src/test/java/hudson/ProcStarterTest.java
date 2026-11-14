@@ -21,15 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson;
-
-import java.io.File;
-import java.io.IOException;
-
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
 
 import hudson.Launcher.DecoratedLauncher;
 import hudson.Launcher.ProcStarter;
@@ -44,20 +37,32 @@ import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildWrapper;
 import hudson.tasks.BuildWrapperDescriptor;
 import hudson.tasks.Builder;
+import java.io.File;
+import java.io.IOException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * Contains tests for {@link ProcStarter} class.
  * @author Oleg Nenashev, Synopsys Inc.
  * @since 1.568
  */
-public class ProcStarterTest {
+@WithJenkins
+class ProcStarterTest {
 
-    @Rule
-    public JenkinsRule rule = new JenkinsRule();
+    private JenkinsRule rule;
+
+    @BeforeEach
+    void setUp(JenkinsRule j) {
+        rule = j;
+    }
 
     @Test
     @Issue("JENKINS-20559")
-    public void testNonInitializedEnvsNPE() throws Exception {
+    void testNonInitializedEnvsNPE() throws Exception {
         // Create nodes and other test stuff
         rule.jenkins.setNumExecutors(0);
         rule.createSlave();
@@ -70,18 +75,17 @@ public class ProcStarterTest {
         // Run the build. If NPE occurs, the test will fail
         rule.buildAndAssertSuccess(project);
     }
-    
+
     @Test
     @Issue("JENKINS-36277")
-    public void testNonExistingPwd() throws Exception {
+    void testNonExistingPwd() throws Exception {
         rule.jenkins.setNumExecutors(0);
         rule.createSlave();
 
         FreeStyleProject project = rule.createFreeStyleProject();
         project.getBuildersList().add(new EchoBuilder());
-        FreeStyleBuild run = project.scheduleBuild2(0).get();
-        
-        rule.assertBuildStatus(Result.FAILURE, run);
+        FreeStyleBuild run = rule.buildAndAssertStatus(Result.FAILURE, project);
+
         rule.assertLogContains("java.io.IOException: Process working directory", run);
     }
 
@@ -122,20 +126,20 @@ public class ProcStarterTest {
     public static class DecoratedWrapper extends BuildWrapper {
 
         @Override
-        public Launcher decorateLauncher(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException, Run.RunnerAbortedException {
+        public Launcher decorateLauncher(AbstractBuild build, Launcher launcher, BuildListener listener) throws Run.RunnerAbortedException {
             final BuildListener l = listener;
             return new DecoratedLauncher(launcher) {
                 @Override
                 public Proc launch(Launcher.ProcStarter starter) throws IOException {
                     String[] envs = starter.envs(); // Finally, call envs()
-                    l.getLogger().println("[DecoratedWrapper]: Number of environment variables is "+envs.length); // Fail on null
+                    l.getLogger().println("[DecoratedWrapper]: Number of environment variables is " + envs.length); // Fail on null
                     return super.launch(starter);
                 }
             };
         }
 
         @Override
-        public Environment setUp(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
+        public Environment setUp(AbstractBuild build, Launcher launcher, BuildListener listener) {
             return new Environment() {
             };
         }
@@ -144,7 +148,7 @@ public class ProcStarterTest {
         public static class DescriptorImpl extends TestWrapperDescriptor {
         }
     }
-    
+
     public static class EchoBuilder extends Builder {
 
         @Override

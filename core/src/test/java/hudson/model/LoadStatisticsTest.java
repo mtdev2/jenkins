@@ -21,44 +21,33 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+
+import hudson.Functions;
 import hudson.model.MultiStageTimeSeries.TimeScale;
 import hudson.model.queue.SubTask;
-
-import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.StandardOpenOption;
-import org.jfree.chart.JFreeChart;
-import org.junit.Test;
-
-import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
-
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
+import javax.imageio.ImageIO;
+import org.jfree.chart.JFreeChart;
+import org.junit.jupiter.api.Test;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class LoadStatisticsTest {
+class LoadStatisticsTest {
 
     @Test
-    public void graph() throws IOException {
+    void graph() throws IOException {
+        assumeFalse(Functions.isWindows(), "TODO: Implement this test on Windows");
         LoadStatistics ls = new LoadStatistics(0, 0) {
-            public int computeIdleExecutors() {
-                throw new UnsupportedOperationException();
-            }
-
-            public int computeTotalExecutors() {
-                throw new UnsupportedOperationException();
-            }
-
-            public int computeQueueLength() {
-                throw new UnsupportedOperationException();
-            }
             @Override
             protected Iterable<Node> getNodes() {
                 throw new UnsupportedOperationException();
@@ -92,44 +81,6 @@ public class LoadStatisticsTest {
             ImageIO.write(image, "PNG", os);
         } finally {
             tempFile.delete();
-        }
-    }
-
-    @Test
-    public void isModernWorks() throws Exception {
-        assertThat(LoadStatistics.isModern(Modern.class), is(true));
-        assertThat(LoadStatistics.isModern(LoadStatistics.class), is(false));
-    }
-
-    private static class Modern extends LoadStatistics {
-
-        protected Modern(int initialOnlineExecutors, int initialBusyExecutors) {
-            super(initialOnlineExecutors, initialBusyExecutors);
-        }
-
-        @Override
-        public int computeIdleExecutors() {
-            return 0;
-        }
-
-        @Override
-        public int computeTotalExecutors() {
-            return 0;
-        }
-
-        @Override
-        public int computeQueueLength() {
-            return 0;
-        }
-
-        @Override
-        protected Iterable<Node> getNodes() {
-            return null;
-        }
-
-        @Override
-        protected boolean matches(Queue.Item item, SubTask subTask) {
-            return false;
         }
     }
 }

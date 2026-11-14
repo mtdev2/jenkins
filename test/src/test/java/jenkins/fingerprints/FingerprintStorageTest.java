@@ -21,30 +21,37 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.fingerprints;
-
-import hudson.Util;
-import hudson.model.Fingerprint;
-import hudson.model.FingerprintCleanupThreadTest;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-
-import java.io.IOException;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
-import static org.hamcrest.core.Is.is;
-import static org.hamcrest.core.IsNot.not;
 
-public class FingerprintStorageTest {
+import hudson.ExtensionList;
+import hudson.Util;
+import hudson.model.Fingerprint;
+import hudson.model.FingerprintCleanupThreadTest;
+import java.io.IOException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-    @Rule
-    public JenkinsRule jenkinsRule = new JenkinsRule();
+@WithJenkins
+class FingerprintStorageTest {
+
+    private JenkinsRule jenkinsRule;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        jenkinsRule = rule;
+    }
 
     @Test
-    public void testLoadingAndSavingLocalStorageFingerprintWithExternalStorage() throws IOException {
+    void testLoadingAndSavingLocalStorageFingerprintWithExternalStorage() throws IOException {
         String id = Util.getDigestOf("testLoadingAndSavingLocalStorageFingerprintWithExternalStorage");
         Fingerprint fingerprintSaved = new Fingerprint(null, "foo.jar", Util.fromHexString(id));
         Fingerprint fingerprintLoaded = Fingerprint.load(id);
@@ -63,12 +70,12 @@ public class FingerprintStorageTest {
         assertThat(fingerprintSaved.toString(), is(equalTo(fingerprintLoaded.toString())));
 
         // Ensure that the loaded fingerprint was deleted from local storage after being loaded.
-        fingerprintLoaded = FingerprintStorage.getFileFingerprintStorage().load(id);
+        fingerprintLoaded = ExtensionList.lookupSingleton(FileFingerprintStorage.class).load(id);
         assertThat(fingerprintLoaded, is(nullValue()));
     }
 
     @Test
-    public void testLoadingAndSavingFingerprintWithExternalStorage() throws IOException {
+    void testLoadingAndSavingFingerprintWithExternalStorage() throws IOException {
         FingerprintStorage externalFingerprintStorage = configureExternalStorage();
         String id = Util.getDigestOf("testLoadingAndSavingFingerprintWithExternalStorage");
         Fingerprint fingerprintSaved = new Fingerprint(null, "bar.jar", Util.fromHexString(id));
@@ -78,17 +85,17 @@ public class FingerprintStorageTest {
     }
 
     @Test
-    public void testDeletingLocalStorageFingerprintWithExternalStorageBeforeMigration() throws IOException {
+    void testDeletingLocalStorageFingerprintWithExternalStorageBeforeMigration() throws IOException {
         String id = Util.getDigestOf("testLoadingAndSavingLocalStorageFingerprintWithExternalStorage");
         new Fingerprint(null, "foo.jar", Util.fromHexString(id));
         configureExternalStorage();
         Fingerprint.delete(id);
-        Fingerprint fingerprintLoaded = FingerprintStorage.getFileFingerprintStorage().load(id);
+        Fingerprint fingerprintLoaded = ExtensionList.lookupSingleton(FileFingerprintStorage.class).load(id);
         assertThat(fingerprintLoaded, is(nullValue()));
     }
 
     @Test
-    public void testDeletingLocalStorageFingerprintWithExternalStorageAfterMigration() throws IOException {
+    void testDeletingLocalStorageFingerprintWithExternalStorageAfterMigration() throws IOException {
         String id = Util.getDigestOf("testLoadingAndSavingLocalStorageFingerprintWithExternalStorage");
         new Fingerprint(null, "foo.jar", Util.fromHexString(id));
         FingerprintStorage externalFingerprintStorage = configureExternalStorage();
@@ -99,7 +106,7 @@ public class FingerprintStorageTest {
     }
 
     @Test
-    public void testDeletingFingerprintWithExternalStorage() throws IOException {
+    void testDeletingFingerprintWithExternalStorage() throws IOException {
         configureExternalStorage();
         String id = Util.getDigestOf("testLoadingAndSavingLocalStorageFingerprintWithExternalStorage");
         new Fingerprint(null, "foo.jar", Util.fromHexString(id));
@@ -109,14 +116,14 @@ public class FingerprintStorageTest {
     }
 
     @Test
-    public void testMigrationDeletesFingerprintsInMemoryFromFileStorage() throws IOException {
+    void testMigrationDeletesFingerprintsInMemoryFromFileStorage() throws IOException {
         String id = Util.getDigestOf("testMigrationDeletesFingerprintsInMemoryFromFileStorage");
         Fingerprint fingerprintSaved = new Fingerprint(null, "foo.jar", Util.fromHexString(id));
         configureExternalStorage();
         fingerprintSaved.add("test", 3);
         // This fingerprint is now implicitly saved without making a load call.
         // We want the file storage to not have this fingerprint now.
-        Fingerprint fingerprintLoaded = FingerprintStorage.getFileFingerprintStorage().load(id);
+        Fingerprint fingerprintLoaded = ExtensionList.lookupSingleton(FileFingerprintStorage.class).load(id);
         assertThat(fingerprintLoaded, is(nullValue()));
 
     }

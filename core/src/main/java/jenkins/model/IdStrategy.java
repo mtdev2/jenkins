@@ -21,33 +21,33 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.model;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.DescriptorExtensionList;
 import hudson.Extension;
 import hudson.ExtensionPoint;
-import hudson.model.AbstractDescribableImpl;
-import org.apache.commons.lang.StringUtils;
+import hudson.model.Describable;
+import java.io.Serializable;
+import java.util.Comparator;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.ProtectedExternally;
 import org.kohsuke.stapler.DataBoundConstructor;
-
-import edu.umd.cs.findbugs.annotations.NonNull;
-import java.io.Serializable;
-import java.util.Comparator;
-import java.util.Locale;
-import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * The strategy to use for manipulating converting names (e.g. user names, group names, etc) into ids.
  *
  * @since 1.566
  */
-public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> implements ExtensionPoint,
+public abstract class IdStrategy implements Describable<IdStrategy>, ExtensionPoint,
         Comparator<String> {
 
     private static final Pattern PSEUDO_UNICODE_PATTERN = Pattern.compile("\\$[a-f0-9]{4}");
@@ -56,7 +56,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
     /**
      * The default case insensitive strategy.
      */
-    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "used in several plugins")
     public static IdStrategy CASE_INSENSITIVE = new CaseInsensitive();
 
     /**
@@ -113,9 +113,9 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
      * Compare two IDs and return {@code true} IFF the two ids are the same. Normally we expect that this should be
      * the same as {@link #compare(String, String)} being equal to {@code 0}, however there may be a specific reason
      * for going beyond that, such as sorting id's case insensitively while treating them as case sensitive.
-     * 
+     *
      * Subclasses may want to override this naïve implementation that calls {@code compare(id1, id2) == 0} for a more performant implementation.
-     * 
+     *
      * @param id1 the first id.
      * @param id2 the second id.
      * @return {@code true} if and only if the two ids are the same.
@@ -138,7 +138,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
 
     @Override
     public IdStrategyDescriptor getDescriptor() {
-        return (IdStrategyDescriptor) super.getDescriptor();
+        return (IdStrategyDescriptor) Describable.super.getDescriptor();
     }
 
     /**
@@ -212,12 +212,12 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
 
         @Override
         public boolean equals(@NonNull String id1, @NonNull String id2) {
-            return id1.equalsIgnoreCase(id2);
+            return keyFor(id1).equals(keyFor(id2));
         }
 
         @Override
         public int compare(@NonNull String id1, @NonNull String id2) {
-            return id1.compareToIgnoreCase(id2);
+            return keyFor(id1).compareTo(keyFor(id2));
         }
 
         @Extension @Symbol("caseInsensitive")
@@ -253,7 +253,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
 
         @Override
         public boolean equals(@NonNull String id1, @NonNull String id2) {
-            return StringUtils.equals(id1, id2);
+            return Objects.equals(id1, id2);
         }
 
         @Override
@@ -264,6 +264,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
         @Extension @Symbol("caseSensitive")
         public static class DescriptorImpl extends IdStrategyDescriptor {
 
+            @NonNull
             @Override
             public String getDisplayName() {
                 return Messages.IdStrategy_CaseSensitive_DisplayName();
@@ -289,7 +290,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
 
         @Override
         public boolean equals(@NonNull String id1, @NonNull String id2) {
-            return StringUtils.equals(keyFor(id1), keyFor(id2));
+            return Objects.equals(keyFor(id1), keyFor(id2));
         }
 
         @Override
@@ -297,7 +298,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
         public String keyFor(@NonNull String id) {
             int index = id.lastIndexOf('@'); // The @ can be used in local-part if quoted correctly
             // => the last @ is the one used to separate the domain and local-part
-            return index == -1 ? id : id.substring(0, index) + (id.substring(index).toLowerCase(Locale.ENGLISH));
+            return index == -1 ? id : id.substring(0, index) + id.substring(index).toLowerCase(Locale.ENGLISH);
         }
 
         @Override
@@ -308,6 +309,7 @@ public abstract class IdStrategy extends AbstractDescribableImpl<IdStrategy> imp
         @Extension
         public static class DescriptorImpl extends IdStrategyDescriptor {
 
+            @NonNull
             @Override
             public String getDisplayName() {
                 return Messages.IdStrategy_CaseSensitiveEmailAddress_DisplayName();

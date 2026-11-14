@@ -1,21 +1,31 @@
 package lib.form;
 
-import com.gargoylesoftware.htmlunit.html.DomNodeUtil;
-import com.gargoylesoftware.htmlunit.html.HtmlElement;
-import com.gargoylesoftware.htmlunit.html.HtmlInput;
-import com.gargoylesoftware.htmlunit.html.HtmlOption;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import com.gargoylesoftware.htmlunit.html.HtmlSelect;
-import hudson.model.AbstractDescribableImpl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import hudson.ExtensionList;
 import hudson.model.Describable;
 import hudson.model.Descriptor;
-import net.sf.json.JSONObject;
-import org.jvnet.hudson.test.HudsonTestCase;
-import org.jvnet.hudson.test.TestExtension;
-import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
-
+import hudson.model.InvisibleAction;
+import hudson.model.RootAction;
 import java.util.List;
+import java.util.Objects;
+import jenkins.model.Jenkins;
+import net.sf.json.JSONObject;
+import org.htmlunit.html.DomNodeUtil;
+import org.htmlunit.html.HtmlElement;
+import org.htmlunit.html.HtmlInput;
+import org.htmlunit.html.HtmlOption;
+import org.htmlunit.html.HtmlPage;
+import org.htmlunit.html.HtmlSelect;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * Tests the 'rowvg-start' and 'rowvg-end' CSS attributes and their effects.
@@ -33,19 +43,26 @@ import java.util.List;
  *
  * @author Kohsuke Kawaguchi
  */
-public class RowVisibilityGroupTest extends HudsonTestCase implements Describable<RowVisibilityGroupTest> {
-    public Drink drink;
-    private Beer beer;
+@WithJenkins
+class RowVisibilityGroupTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     /**
      * Nested optional blocks
      */
-    public void test1() throws Exception {
-        HtmlPage p = createWebClient().goTo("self/test1");
+    @Test
+    void test1() throws Exception {
+        HtmlPage p = j.createWebClient().goTo("self/test1");
 
-        HtmlElement outer = (HtmlElement)DomNodeUtil.selectSingleNode(p, "//INPUT[@name='outer']");
-        HtmlElement inner = (HtmlElement)DomNodeUtil.selectSingleNode(p, "//INPUT[@name='inner']");
-        HtmlInput field = (HtmlInput)DomNodeUtil.selectSingleNode(p, "//INPUT[@type='text'][@name='_.field']");
+        HtmlElement outer = DomNodeUtil.selectSingleNode(p, "//INPUT[@name='outer']");
+        HtmlElement inner = DomNodeUtil.selectSingleNode(p, "//INPUT[@name='inner']");
+        HtmlInput field = DomNodeUtil.selectSingleNode(p, "//INPUT[@type='text'][@name='_.field']");
 
         // outer gets unfolded, but inner should be still folded
         outer.click();
@@ -65,68 +82,58 @@ public class RowVisibilityGroupTest extends HudsonTestCase implements Describabl
     /**
      * optional block inside the dropdownDescriptorSelector
      */
-    public void test2() throws Exception {
-        HtmlPage p = createWebClient().goTo("self/test2");
+    @Test
+    void test2() throws Exception {
+        HtmlPage p = j.createWebClient().goTo("self/test2");
 
-        HtmlSelect s = (HtmlSelect)DomNodeUtil.selectSingleNode(p, "//SELECT");
+        HtmlSelect s = DomNodeUtil.selectSingleNode(p, "//SELECT");
         List<HtmlOption> opts = s.getOptions();
 
         // those first selections will load additional HTMLs
-        s.setSelectedAttribute(opts.get(0),true);
-        s.setSelectedAttribute(opts.get(1),true);
+        s.setSelectedAttribute(opts.get(0), true);
+        s.setSelectedAttribute(opts.get(1), true);
 
         // now select back what's already loaded, to cause the existing elements to be displayed
-        s.setSelectedAttribute(opts.get(0),true);
+        s.setSelectedAttribute(opts.get(0), true);
 
         // make sure that the inner control is still hidden
         List<HtmlInput> textboxes = DomNodeUtil.selectNodes(p, "//INPUT[@name='_.textbox2']");
-        assertEquals(2,textboxes.size());
+        assertEquals(2, textboxes.size());
         for (HtmlInput e : textboxes)
             assertFalse(e.isDisplayed());
 
         // reveal the text box
         List<HtmlInput> checkboxes = DomNodeUtil.selectNodes(p, "//INPUT[@name='inner']");
-        assertEquals(2,checkboxes.size());
-        checkboxes.get(0).click();
-        assertTrue(textboxes.get(0).isDisplayed());
-        textboxes.get(0).type("Budweiser");
+        assertEquals(2, checkboxes.size());
+        checkboxes.getFirst().click();
+        assertTrue(textboxes.getFirst().isDisplayed());
+        textboxes.getFirst().type("Budweiser");
 
         // toggle the selection again
-        s.setSelectedAttribute(opts.get(1),true);
-        s.setSelectedAttribute(opts.get(0),true);
+        s.setSelectedAttribute(opts.get(1), true);
+        s.setSelectedAttribute(opts.get(0), true);
 
         // make sure it's still displayed this time
-        assertTrue(checkboxes.get(0).isChecked());
-        assertTrue(textboxes.get(0).isDisplayed());
+        assertTrue(checkboxes.getFirst().isChecked());
+        assertTrue(textboxes.getFirst().isDisplayed());
 
         // make sure we get what we expect
-        submit(p.getFormByName("config"));
-        assertEqualDataBoundBeans(beer,new Beer("",new Nested("Budweiser")));
+        j.submit(p.getFormByName("config"));
+        RootActionImpl rootAction = ExtensionList.lookupSingleton(RootActionImpl.class);
+        j.assertEqualDataBoundBeans(rootAction.beer, new Beer("", new Nested("Budweiser")));
     }
-
-    public void doSubmitTest2(StaplerRequest req) throws Exception {
-        JSONObject json = req.getSubmittedForm();
-        System.out.println(json);
-        beer = (Beer)req.bindJSON(Drink.class,json.getJSONObject("drink"));
-    }
-
-    public DescriptorImpl getDescriptor() {
-        return jenkins.getDescriptorByType(DescriptorImpl.class);
-    }
-
-    @TestExtension
-    public static final class DescriptorImpl extends Descriptor<RowVisibilityGroupTest> {}
 
     public static class Nested {
         public String textbox2;
 
+        @SuppressWarnings("checkstyle:redundantmodifier")
         @DataBoundConstructor
         public Nested(String textbox2) {
             this.textbox2 = textbox2;
         }
     }
 
-    public abstract static class Drink extends AbstractDescribableImpl<Drink> {
+    public abstract static class Drink implements Describable<Drink> {
         public String textbox1;
         public Nested inner;
 
@@ -137,6 +144,7 @@ public class RowVisibilityGroupTest extends HudsonTestCase implements Describabl
     }
 
     public static class Beer extends Drink {
+        @SuppressWarnings("checkstyle:redundantmodifier")
         @DataBoundConstructor
         public Beer(String textbox1, Nested inner) {
             super(textbox1, inner);
@@ -147,6 +155,7 @@ public class RowVisibilityGroupTest extends HudsonTestCase implements Describabl
     }
 
     public static class Coke extends Drink {
+        @SuppressWarnings("checkstyle:redundantmodifier")
         @DataBoundConstructor
         public Coke(String textbox1, Nested inner) {
             super(textbox1, inner);
@@ -154,5 +163,31 @@ public class RowVisibilityGroupTest extends HudsonTestCase implements Describabl
 
         @TestExtension
         public static class DescriptorImpl extends Descriptor<Drink> {}
+    }
+
+    @TestExtension
+    public static final class RootActionImpl extends InvisibleAction implements Describable<RootActionImpl>, RootAction {
+
+        public Drink drink;
+        private Beer beer;
+
+        public void doSubmitTest2(StaplerRequest2 req) throws Exception {
+            JSONObject json = req.getSubmittedForm();
+            System.out.println(json);
+            beer = (Beer) req.bindJSON(Drink.class, json.getJSONObject("drink"));
+        }
+
+        @Override
+        public Descriptor<RootActionImpl> getDescriptor() {
+            return Objects.requireNonNull(Jenkins.get().getDescriptorByType(DescriptorImpl.class));
+        }
+
+        @TestExtension
+        public static final class DescriptorImpl extends Descriptor<RootActionImpl> {}
+
+        @Override
+        public String getUrlName() {
+            return "self";
+        }
     }
 }

@@ -24,38 +24,45 @@
 
 package jenkins.model;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import hudson.model.AbstractProject;
 import hudson.model.FreeStyleProject;
 import hudson.tasks.LogRotator;
 import java.io.StringReader;
 import javax.xml.transform.Source;
 import javax.xml.transform.stream.StreamSource;
-import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-import org.junit.Rule;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.recipes.LocalData;
 
-public class BuildDiscarderPropertyTest {
+@WithJenkins
+class BuildDiscarderPropertyTest {
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
+    private JenkinsRule r;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
 
     @Issue("JENKINS-31518")
     @LocalData
     @Test
-    public void buildDiscarderField() throws Exception {
+    void buildDiscarderField() throws Exception {
         FreeStyleProject p = r.jenkins.getItemByFullName("p", FreeStyleProject.class);
         verifyBuildDiscarder(p);
         r.configRoundtrip(p);
         verifyBuildDiscarder(p);
         String xml = p.getConfigFile().asString();
-        assertFalse(xml, xml.contains("<logRotator class="));
-        assertTrue(xml, xml.contains("<" + BuildDiscarderProperty.class.getName() + ">"));
+        assertFalse(xml.contains("<logRotator class="), xml);
+        assertTrue(xml.contains("<" + BuildDiscarderProperty.class.getName() + ">"), xml);
     }
 
     private void verifyBuildDiscarder(FreeStyleProject p) {
@@ -71,8 +78,8 @@ public class BuildDiscarderPropertyTest {
     @Issue("JENKINS-16979")
     @LocalData
     @Test
-    public void logRotatorField() throws Exception {
-        AbstractProject<?,?> p = r.jenkins.getItemByFullName("foo", AbstractProject.class);
+    void logRotatorField() throws Exception {
+        AbstractProject<?, ?> p = r.jenkins.getItemByFullName("foo", AbstractProject.class);
         verifyLogRotatorSanity(p);
 
         // now persist in the new format
@@ -85,10 +92,10 @@ public class BuildDiscarderPropertyTest {
         verifyLogRotatorSanity(p);
 
         // another sanity check
-        assertTrue(xml, xml.contains("<logRotator class=\"" + LogRotator.class.getName() + "\">"));
+        assertTrue(xml.contains("<logRotator class=\"" + LogRotator.class.getName() + "\">"), xml);
     }
 
-    private static void verifyLogRotatorSanity(AbstractProject<?,?> p) {
+    private static void verifyLogRotatorSanity(AbstractProject<?, ?> p) {
         LogRotator d = (LogRotator) p.getBuildDiscarder();
         assertEquals(4, d.getDaysToKeep());
         assertEquals(3, d.getNumToKeep());

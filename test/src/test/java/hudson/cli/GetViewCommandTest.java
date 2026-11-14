@@ -24,37 +24,38 @@
 
 package hudson.cli;
 
+import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.startsWith;
-import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
-import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
-
-import java.io.IOException;
 
 import hudson.model.ListView;
 import hudson.model.View;
+import java.io.IOException;
 import jenkins.model.Jenkins;
-
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class GetViewCommandTest {
+@WithJenkins
+class GetViewCommandTest {
 
     private CLICommandInvoker command;
 
-    @Rule public final JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before public void setUp() {
-
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
         command = new CLICommandInvoker(j, new GetViewCommand());
     }
 
-    @Test public void getViewShouldFailWithoutViewReadPermission() throws IOException {
+    @Test
+    void getViewShouldFailWithoutViewReadPermission() throws IOException {
 
         j.jenkins.addView(new ListView("aView"));
 
@@ -68,7 +69,8 @@ public class GetViewCommandTest {
         assertThat(result.stderr(), containsString("ERROR: user is missing the View/Read permission"));
     }
 
-    @Test public void getViewShouldYieldConfigXml() throws Exception {
+    @Test
+    void getViewShouldYieldConfigXml() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
 
@@ -83,7 +85,8 @@ public class GetViewCommandTest {
         assertThat(result.stdout(), containsString("<name>aView</name>"));
     }
 
-    @Test public void getViewShouldFailIfViewDoesNotExist() {
+    @Test
+    void getViewShouldFailIfViewDoesNotExist() {
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(View.READ, Jenkins.READ)

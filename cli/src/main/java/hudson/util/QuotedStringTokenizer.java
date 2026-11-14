@@ -33,12 +33,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========================================================================
+
 package hudson.util;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.StringTokenizer;
-import java.util.List;
-import java.util.ArrayList;
 
 /* ------------------------------------------------------------ */
 /** StringTokenizer with Quoting support.
@@ -55,24 +56,24 @@ import java.util.ArrayList;
 public class QuotedStringTokenizer
     extends StringTokenizer
 {
-    private static final String __delim=" \t\n\r";
+    private static final String __delim = " \t\n\r";
     private String _string;
     private String _delim = __delim;
-    private boolean _returnQuotes=false;
-    private boolean _returnDelimiters=false;
+    private boolean _returnQuotes = false;
+    private boolean _returnDelimiters = false;
     private StringBuilder _token;
-    private boolean _hasToken=false;
-    private int _i=0;
-    private int _lastStart=0;
-    private boolean _double=true;
-    private boolean _single=true;
+    private boolean _hasToken = false;
+    private int _i = 0;
+    private int _lastStart = 0;
+    private boolean _double = true;
+    private boolean _single = true;
 
     public static String[] tokenize(String str) {
         return new QuotedStringTokenizer(str).toArray();
     }
 
     public static String[] tokenize(String str, String delimiters) {
-        return new QuotedStringTokenizer(str,delimiters).toArray();
+        return new QuotedStringTokenizer(str, delimiters).toArray();
     }
 
     /* ------------------------------------------------------------ */
@@ -94,17 +95,17 @@ public class QuotedStringTokenizer
                                  boolean returnQuotes)
     {
         super("");
-        _string=str;
-        if (delim!=null)
-            _delim=delim;
-        _returnDelimiters=returnDelimiters;
-        _returnQuotes=returnQuotes;
+        _string = str;
+        if (delim != null)
+            _delim = delim;
+        _returnDelimiters = returnDelimiters;
+        _returnQuotes = returnQuotes;
 
-        if (_delim.indexOf('\'')>=0 ||
-            _delim.indexOf('"')>=0)
-            throw new Error("Can't use quotes as delimiters: "+_delim);
+        if (_delim.indexOf('\'') >= 0 ||
+            _delim.indexOf('"') >= 0)
+            throw new Error("Can't use quotes as delimiters: " + _delim);
 
-        _token=new StringBuilder(_string.length()>1024?512:_string.length()/2);
+        _token = new StringBuilder(_string.length() > 1024 ? 512 : _string.length() / 2);
     }
 
     /* ------------------------------------------------------------ */
@@ -112,25 +113,25 @@ public class QuotedStringTokenizer
                                  String delim,
                                  boolean returnDelimiters)
     {
-        this(str,delim,returnDelimiters,false);
+        this(str, delim, returnDelimiters, false);
     }
 
     /* ------------------------------------------------------------ */
     public QuotedStringTokenizer(String str,
                                  String delim)
     {
-        this(str,delim,false,false);
+        this(str, delim, false, false);
     }
 
     /* ------------------------------------------------------------ */
     public QuotedStringTokenizer(String str)
     {
-        this(str,null,false,false);
+        this(str, null, false, false);
     }
 
     public String[] toArray() {
         List<String> r = new ArrayList<>();
-        while(hasMoreTokens())
+        while (hasMoreTokens())
             r.add(nextToken());
         return r.toArray(new String[r.size()]);
     }
@@ -144,75 +145,75 @@ public class QuotedStringTokenizer
         if (_hasToken)
             return true;
 
-        _lastStart=_i;
+        _lastStart = _i;
 
-        int state=0;
-        boolean escape=false;
-        while (_i<_string.length())
+        int state = 0;
+        boolean escape = false;
+        while (_i < _string.length())
         {
-            char c=_string.charAt(_i++);
+            char c = _string.charAt(_i++);
 
             switch (state)
             {
               case 0: // Start
-                  if(_delim.indexOf(c)>=0)
+                  if (_delim.indexOf(c) >= 0)
                   {
                       if (_returnDelimiters)
                       {
                           _token.append(c);
-                          return _hasToken=true;
+                          return _hasToken = true;
                       }
                   }
-                  else if (c=='\'' && _single)
+                  else if (c == '\'' && _single)
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      state=2;
+                      state = 2;
                   }
-                  else if (c=='\"' && _double)
+                  else if (c == '\"' && _double)
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      state=3;
+                      state = 3;
                   }
                   else
                   {
                       _token.append(c);
-                      _hasToken=true;
-                      state=1;
+                      _hasToken = true;
+                      state = 1;
                   }
                   continue;
 
               case 1: // Token
-                  _hasToken=true;
+                  _hasToken = true;
                   if (escape)
                   {
-                      escape=false;
-                      if(ESCAPABLE_CHARS.indexOf(c)<0)
+                      escape = false;
+                      if (ESCAPABLE_CHARS.indexOf(c) < 0)
                           _token.append('\\');
                       _token.append(c);
                   }
-                  else if(_delim.indexOf(c)>=0)
+                  else if (_delim.indexOf(c) >= 0)
                   {
                       if (_returnDelimiters)
                           _i--;
                       return _hasToken;
                   }
-                  else if (c=='\'' && _single)
+                  else if (c == '\'' && _single)
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      state=2;
+                      state = 2;
                   }
-                  else if (c=='\"' && _double)
+                  else if (c == '\"' && _double)
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      state=3;
+                      state = 3;
                   }
-                  else if (c=='\\')
+                  else if (c == '\\')
                   {
-                      escape=true;
+                      escape = true;
                   }
                   else
                       _token.append(c);
@@ -220,25 +221,25 @@ public class QuotedStringTokenizer
 
 
               case 2: // Single Quote
-                  _hasToken=true;
+                  _hasToken = true;
                   if (escape)
                   {
-                      escape=false;
-                      if(ESCAPABLE_CHARS.indexOf(c)<0)
+                      escape = false;
+                      if (ESCAPABLE_CHARS.indexOf(c) < 0)
                           _token.append('\\');
                       _token.append(c);
                   }
-                  else if (c=='\'')
+                  else if (c == '\'')
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      state=1;
+                      state = 1;
                   }
-                  else if (c=='\\')
+                  else if (c == '\\')
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      escape=true;
+                      escape = true;
                   }
                   else
                       _token.append(c);
@@ -246,29 +247,32 @@ public class QuotedStringTokenizer
 
 
               case 3: // Double Quote
-                  _hasToken=true;
+                  _hasToken = true;
                   if (escape)
                   {
-                      escape=false;
-                      if(ESCAPABLE_CHARS.indexOf(c)<0)
+                      escape = false;
+                      if (ESCAPABLE_CHARS.indexOf(c) < 0)
                           _token.append('\\');
                       _token.append(c);
                   }
-                  else if (c=='\"')
+                  else if (c == '\"')
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      state=1;
+                      state = 1;
                   }
-                  else if (c=='\\')
+                  else if (c == '\\')
                   {
                       if (_returnQuotes)
                           _token.append(c);
-                      escape=true;
+                      escape = true;
                   }
                   else
                       _token.append(c);
                   continue;
+
+              default:
+                  break;
             }
         }
 
@@ -280,11 +284,11 @@ public class QuotedStringTokenizer
     public String nextToken()
         throws NoSuchElementException
     {
-        if (!hasMoreTokens() || _token==null)
+        if (!hasMoreTokens() || _token == null)
             throw new NoSuchElementException();
-        String t=_token.toString();
+        String t = _token.toString();
         _token.setLength(0);
-        _hasToken=false;
+        _hasToken = false;
         return t;
     }
 
@@ -293,10 +297,10 @@ public class QuotedStringTokenizer
     public String nextToken(String delim)
         throws NoSuchElementException
     {
-        _delim=delim;
-        _i=_lastStart;
+        _delim = delim;
+        _i = _lastStart;
         _token.setLength(0);
-        _hasToken=false;
+        _hasToken = false;
         return nextToken();
     }
 
@@ -335,19 +339,19 @@ public class QuotedStringTokenizer
      */
     public static String quote(String s, String delim)
     {
-        if (s==null)
+        if (s == null)
             return null;
-        if (s.length()==0)
+        if (s.isEmpty())
             return "\"\"";
 
 
-        for (int i=0;i<s.length();i++)
+        for (int i = 0; i < s.length(); i++)
         {
             char c = s.charAt(i);
-            if (c=='\\' || c=='"' || c=='\'' || Character.isWhitespace(c) || delim.indexOf(c)>=0)
+            if (c == '\\' || c == '"' || c == '\'' || Character.isWhitespace(c) || delim.indexOf(c) >= 0)
             {
-                StringBuffer b=new StringBuffer(s.length()+8);
-                quote(b,s);
+                StringBuffer b = new StringBuffer(s.length() + 8);
+                quote(b, s);
                 return b.toString();
             }
         }
@@ -357,21 +361,21 @@ public class QuotedStringTokenizer
 
     /* ------------------------------------------------------------ */
     /** Quote a string.
-     * The string is quoted only if quoting is required due to
-     * embedded delimiters, quote characters or the
-     * empty string.
+     * The string is always quoted, even when quoting is not required.
+     * Use {@link #quote(String, String)} to quote only when required due to
+     * embedded delimiters, quote characters or the empty string.
      * @param s The string to quote.
      * @return quoted string
      */
     public static String quote(String s)
     {
-        if (s==null)
+        if (s == null)
             return null;
-        if (s.length()==0)
+        if (s.isEmpty())
             return "\"\"";
 
-        StringBuffer b=new StringBuffer(s.length()+8);
-        quote(b,s);
+        StringBuffer b = new StringBuffer(s.length() + 8);
+        quote(b, s);
         return b.toString();
 
     }
@@ -385,13 +389,13 @@ public class QuotedStringTokenizer
      */
     public static void quote(StringBuffer buf, String s)
     {
-        synchronized(buf)
+        synchronized (buf)
         {
             buf.append('"');
-            for (int i=0;i<s.length();i++)
+            for (int i = 0; i < s.length(); i++)
             {
                 char c = s.charAt(i);
-                switch(c)
+                switch (c)
                 {
                     case '"':
                         buf.append("\\\"");
@@ -417,7 +421,6 @@ public class QuotedStringTokenizer
 
                     default:
                         buf.append(c);
-                        continue;
                 }
             }
             buf.append('"');
@@ -427,29 +430,29 @@ public class QuotedStringTokenizer
     /* ------------------------------------------------------------ */
     /** Unquote a string.
      * @param s The string to unquote.
-     * @return quoted string
+     * @return unquoted string
      */
     public static String unquote(String s)
     {
-        if (s==null)
+        if (s == null)
             return null;
-        if (s.length()<2)
+        if (s.length() < 2)
             return s;
 
-        char first=s.charAt(0);
-        char last=s.charAt(s.length()-1);
-        if (first!=last || (first!='"' && first!='\''))
+        char first = s.charAt(0);
+        char last = s.charAt(s.length() - 1);
+        if (first != last || (first != '"' && first != '\''))
             return s;
 
-        StringBuilder b=new StringBuilder(s.length()-2);
-        boolean escape=false;
-        for (int i=1;i<s.length()-1;i++)
+        StringBuilder b = new StringBuilder(s.length() - 2);
+        boolean escape = false;
+        for (int i = 1; i < s.length() - 1; i++)
         {
             char c = s.charAt(i);
 
             if (escape)
             {
-                escape=false;
+                escape = false;
                 switch (c)
                 {
                     case 'n':
@@ -468,11 +471,13 @@ public class QuotedStringTokenizer
                         b.append('\b');
                         break;
                     case 'u':
-                        b.append((char)(
-                                (convertHexDigit((byte)s.charAt(i++))<<24)+
-                                (convertHexDigit((byte)s.charAt(i++))<<16)+
-                                (convertHexDigit((byte)s.charAt(i++))<<8)+
-                                (convertHexDigit((byte)s.charAt(i++)))
+                        if (i + 4 >= s.length() - 1)
+                            throw new IllegalArgumentException("Incomplete Unicode escape sequence in " + s);
+                        b.append((char) (
+                                (parseHexDigit(s.charAt(++i)) << 12) +
+                                (parseHexDigit(s.charAt(++i)) << 8) +
+                                (parseHexDigit(s.charAt(++i)) << 4) +
+                                parseHexDigit(s.charAt(++i))
                                 )
                         );
                         break;
@@ -480,10 +485,9 @@ public class QuotedStringTokenizer
                         b.append(c);
                 }
             }
-            else if (c=='\\')
+            else if (c == '\\')
             {
-                escape=true;
-                continue;
+                escape = true;
             }
             else
                 b.append(c);
@@ -507,7 +511,7 @@ public class QuotedStringTokenizer
      */
     public void setDouble(boolean d)
     {
-        _double=d;
+        _double = d;
     }
 
     /* ------------------------------------------------------------ */
@@ -525,19 +529,26 @@ public class QuotedStringTokenizer
      */
     public void setSingle(boolean single)
     {
-        _single=single;
+        _single = single;
     }
 
     /**
      * @param b An ASCII encoded character 0-9 a-f A-F
      * @return The byte value of the character 0-16.
      */
-    public static byte convertHexDigit( byte b )
+    public static byte convertHexDigit(byte b)
     {
-        if ((b >= '0') && (b <= '9')) return (byte)(b - '0');
-        if ((b >= 'a') && (b <= 'f')) return (byte)(b - 'a' + 10);
-        if ((b >= 'A') && (b <= 'F')) return (byte)(b - 'A' + 10);
+        if (b >= '0' && b <= '9') return (byte) (b - '0');
+        if (b >= 'a' && b <= 'f') return (byte) (b - 'a' + 10);
+        if (b >= 'A' && b <= 'F') return (byte) (b - 'A' + 10);
         return 0;
+    }
+
+    private static int parseHexDigit(char c) {
+        int digit = Character.digit(c, 16);
+        if (digit < 0)
+            throw new IllegalArgumentException("Invalid hex digit '" + c + "' in Unicode escape sequence");
+        return digit;
     }
 
     /**
@@ -545,18 +556,7 @@ public class QuotedStringTokenizer
      *
      * Others, like, say, \W will be left alone instead of becoming just W.
      * This is important to keep Hudson behave on Windows, which uses '\' as
-     * the directory separator. 
+     * the directory separator.
      */
     private static final String ESCAPABLE_CHARS = "\\\"' ";
 }
-
-
-
-
-
-
-
-
-
-
-

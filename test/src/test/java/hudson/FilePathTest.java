@@ -24,29 +24,40 @@
 
 package hudson;
 
-import hudson.model.Node;
-import org.apache.tools.ant.DirectoryScanner;
-import static org.hamcrest.Matchers.*;
-import org.junit.Test;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
-import static org.junit.Assume.*;
-import org.junit.Rule;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.recipes.LocalData;
+import static org.hamcrest.Matchers.arrayContainingInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.emptyArray;
+import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+import hudson.model.Node;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import org.apache.tools.ant.DirectoryScanner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.jvnet.hudson.test.recipes.LocalData;
 
-public class FilePathTest {
+@WithJenkins
+class FilePathTest {
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
+    private JenkinsRule r;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
 
     @Issue("JENKINS-50237")
     @Test
-    public void listGlob() throws Exception {
+    void listGlob() throws Exception {
         for (Node n : new Node[] {r.jenkins, r.createOnlineSlave()}) {
             FilePath d = n.getRootPath().child("globbing");
             FilePath exists = d.child("dir/exists");
@@ -65,7 +76,7 @@ public class FilePathTest {
     @Test
     @Issue("JENKINS-32778")
     @LocalData("zip_with_relative")
-    public void zipRelativePathHandledCorrectly() throws Exception {
+    void zipRelativePathHandledCorrectly() throws Exception {
         assumeTrue(Functions.isWindows());
         FilePath zipFile = r.jenkins.getRootPath().child("zip-with-folder.zip");
         FilePath targetLocation = r.jenkins.getRootPath().child("unzip-target");
@@ -85,25 +96,20 @@ public class FilePathTest {
     @Test
     @Issue("JENKINS-32778")
     @LocalData("zip_with_relative")
-    public void zipAbsolutePathHandledCorrectly_win() throws Exception {
+    void zipAbsolutePathHandledCorrectly_win() throws Exception {
         assumeTrue(Functions.isWindows());
 
         // this special zip contains a ..\..\ [..] \..\Temp\evil.txt
         FilePath zipFile = r.jenkins.getRootPath().child("zip-slip-win.zip");
 
         FilePath targetLocation = r.jenkins.getRootPath().child("unzip-target");
- 
+
         FilePath good = targetLocation.child("good.txt");
 
         assertThat(good.exists(), is(false));
-        
-        try {
-            zipFile.unzip(targetLocation);
-            fail("The evil.txt should have triggered an exception");
-        }
-        catch(IOException e){
-            assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
-        }
+
+        IOException e = assertThrows(IOException.class, () -> zipFile.unzip(targetLocation));
+        assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
 
         // as the unzip operation failed, the good.txt was potentially unzipped
         // but we need to make sure that the evil.txt is not there
@@ -114,7 +120,7 @@ public class FilePathTest {
     @Test
     @Issue("JENKINS-32778")
     @LocalData("zip_with_relative")
-    public void zipAbsolutePathHandledCorrectly_unix() throws Exception {
+    void zipAbsolutePathHandledCorrectly_unix() throws Exception {
         assumeFalse(Functions.isWindows());
 
         // this special zip contains a ../../../ [..] /../tmp/evil.txt
@@ -126,13 +132,8 @@ public class FilePathTest {
 
         assertThat(good.exists(), is(false));
 
-        try {
-            zipFile.unzip(targetLocation);
-            fail("The evil.txt should have triggered an exception");
-        }
-        catch(IOException e){
-            assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
-        }
+        IOException e = assertThrows(IOException.class, () -> zipFile.unzip(targetLocation));
+        assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
 
         // as the unzip operation failed, the good.txt was potentially unzipped
         // but we need to make sure that the evil.txt is not there
@@ -143,7 +144,7 @@ public class FilePathTest {
     @Test
     @Issue("JENKINS-32778")
     @LocalData("zip_with_relative")
-    public void zipRelativePathHandledCorrectly_oneUp() throws Exception {
+    void zipRelativePathHandledCorrectly_oneUp() throws Exception {
         // internal structure:
         //  ../simple3.txt
         //  child/simple2.txt
@@ -155,21 +156,16 @@ public class FilePathTest {
 
         assertThat(simple3.exists(), is(false));
 
-        try {
-            zipFile.unzip(targetLocation);
-            fail("The ../simple3.txt should have triggered an exception");
-        }
-        catch(IOException e){
-            assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
-        }
+        IOException e = assertThrows(IOException.class, () -> zipFile.unzip(targetLocation));
+        assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
 
         assertThat(simple3.exists(), is(false));
     }
-    
+
     @Test
     @Issue("XXX")
     @LocalData("zip_with_relative")
-    public void zipTarget_regular() throws Exception {
+    void zipTarget_regular() throws Exception {
         assumeTrue(Functions.isWindows());
         File zipFile = new File(r.jenkins.getRootDir(), "zip-with-folder.zip");
         File targetLocation = new File(r.jenkins.getRootDir(), "unzip-target");
@@ -195,7 +191,7 @@ public class FilePathTest {
     @Test
     @Issue("XXX")
     @LocalData("zip_with_relative")
-    public void zipTarget_relative() throws Exception {
+    void zipTarget_relative() throws Exception {
         assumeTrue(Functions.isWindows());
         File zipFile = new File(r.jenkins.getRootDir(), "zip-with-folder.zip");
         // the main difference is here, the ./
@@ -217,5 +213,55 @@ public class FilePathTest {
 
         assertThat(simple1.exists(), is(true));
         assertThat(simple2.exists(), is(true));
+    }
+
+    @Test
+    @Issue("JENKINS-66094")
+    @LocalData("ZipSlipSamePathPrefix")
+    void zipSlipSamePathPrefix() throws Exception {
+        assumeFalse(Functions.isWindows());
+
+        // > unzip -l evil.zip
+        // good.txt
+        //  ../foo_evil.txt
+        FilePath zipFile = r.jenkins.getRootPath().child("evil.zip");
+
+        // foo_evil.txt will be extracted to unzip-target/foo_evil.txt
+        // which has the same path prefix as unzip-target/foo
+        FilePath targetLocationParent = r.jenkins.getRootPath().child("unzip-target");
+        FilePath targetLocationFoo = targetLocationParent.child("foo");
+        FilePath evilEntry = targetLocationParent.child("foo_evil.txt");
+
+        assertThat(evilEntry.exists(), is(false));
+
+        IOException e = assertThrows(IOException.class, () -> zipFile.unzip(targetLocationFoo));
+        assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
+
+        assertThat(evilEntry.exists(), is(false));
+    }
+
+    @Test
+    @Issue("JENKINS-66094")
+    @LocalData("ZipSlipSamePathPrefix")
+    void zipSlipSamePathPrefixWin() throws Exception {
+        assumeTrue(Functions.isWindows());
+
+        // > unzip -l evil-win.zip
+        // good.txt
+        //  ..\foo_evil.txt
+        FilePath zipFile = r.jenkins.getRootPath().child("evil-win.zip");
+
+        // foo_evil.txt will be extracted to unzip-target\foo_evil.txt
+        // which has the same path prefix as unzip-target\foo
+        FilePath targetLocationParent = r.jenkins.getRootPath().child("unzip-target");
+        FilePath targetLocationFoo = targetLocationParent.child("foo");
+        FilePath evilEntry = targetLocationParent.child("foo_evil.txt");
+
+        assertThat(evilEntry.exists(), is(false));
+
+        IOException e = assertThrows(IOException.class, () -> zipFile.unzip(targetLocationFoo));
+        assertThat(e.getMessage(), containsString("contains illegal file name that breaks out of the target directory"));
+
+        assertThat(evilEntry.exists(), is(false));
     }
 }

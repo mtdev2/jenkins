@@ -21,24 +21,24 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.xmlunit.matchers.CompareMatcher.isSimilarTo;
-
-import org.junit.Test;
-import org.xmlunit.diff.DefaultNodeMatcher;
-import org.xmlunit.diff.ElementSelectors;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Test;
+import org.xmlunit.diff.DefaultNodeMatcher;
+import org.xmlunit.diff.ElementSelectors;
 
 /**
  * @author Kohsuke Kawaguchi, Alan Harder
  */
-public class CopyOnWriteListTest {
+class CopyOnWriteListTest {
 
     public static final class TestData {
         CopyOnWriteList list1 = new CopyOnWriteList();
@@ -49,7 +49,7 @@ public class CopyOnWriteListTest {
      * Verify that the serialization form of List and CopyOnWriteList are the same.
      */
     @Test
-    public void serialization() {
+    void serialization() {
         XStream2 xs = new XStream2();
         TestData td = new TestData();
 
@@ -60,7 +60,7 @@ public class CopyOnWriteListTest {
                 .withNodeMatcher(new DefaultNodeMatcher(ElementSelectors.byNameAndText)));
 
 
-        TestData td2 = (TestData)xs.fromXML(out);
+        TestData td2 = (TestData) xs.fromXML(out);
         assertTrue(td2.list1.isEmpty());
         assertTrue(td2.list2.isEmpty());
 
@@ -72,8 +72,8 @@ public class CopyOnWriteListTest {
                 + "</string></list2></hudson.util.CopyOnWriteListTest_-TestData>";
         assertThat(out, isSimilarTo(expected).ignoreWhitespace()
                 .withNodeMatcher(new DefaultNodeMatcher(ElementSelectors.byNameAndText)));
-        td2 = (TestData)xs.fromXML(out);
-        assertEquals("foobar1", td2.list1.getView().get(0));
-        assertEquals("foobar2", td2.list2.get(0));
+        td2 = (TestData) xs.fromXML(out);
+        assertEquals("foobar1", td2.list1.getView().getFirst());
+        assertEquals("foobar2", td2.list2.getFirst());
     }
 }

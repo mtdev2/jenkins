@@ -1,22 +1,20 @@
 package jenkins.util;
 
-import hudson.util.OneShotEvent;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import hudson.util.OneShotEvent;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-
-
-public class AtmostOneTaskExecutorTest {
+class AtmostOneTaskExecutorTest {
 
     @SuppressWarnings("empty-statement")
     @Test
-    public void doubleBooking() throws Exception {
+    void doubleBooking() throws Exception {
         AtomicInteger counter = new AtomicInteger();
         OneShotEvent lock = new OneShotEvent();
         Future<?> f1, f2;
@@ -27,7 +25,7 @@ public class AtmostOneTaskExecutorTest {
             try {
                 lock.block();
             } catch (InterruptedException x) {
-                assert false : x;
+                throw new RuntimeException(x);
             }
             return null;
         });

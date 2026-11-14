@@ -1,174 +1,148 @@
 package hudson.util.io;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import hudson.FilePath;
+import hudson.Functions;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import java.util.zip.ZipInputStream;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.jvnet.hudson.test.Issue;
 
-public class ZipArchiverTest {
+class ZipArchiverTest {
 
-    private static final Logger LOGGER = Logger.getLogger(ZipArchiverTest.class.getName());
-
-    private File tmpDir;
-
-    @Before
-    public void setUp() {
-        try {
-            // initialize temp directory
-            tmpDir = File.createTempFile("temp", ".dir");
-            tmpDir.delete();
-            tmpDir.mkdir();
-        } catch (IOException e) {
-            fail("unable to create temp directory", e);
-        }
-    }
-
-    @After
-    public void tearDown() {
-        deleteDir(tmpDir);
-    }
+    @TempDir
+    private File tmp;
 
     @Issue("JENKINS-9942")
     @Test
-    public void backwardsSlashesOnWindows()  {
+    void backwardsSlashesOnWindows() throws IOException {
         // create foo/bar/baz/Test.txt
-        File tmpFile = null;
-        try {
-            File baz = new File(new File(new File(tmpDir, "foo"), "bar"), "baz");
-            baz.mkdirs();
-
-            tmpFile = new File(baz, "Test.txt");
-            tmpFile.createNewFile();
-        } catch (IOException e) {
-            fail("unable to prepare source directory for zipping", e);
-        }
+        Path baz = newFolder(tmp, "junit").toPath().resolve("foo").resolve("bar").resolve("baz");
+        Files.createDirectories(baz);
+        Path tmpFile = baz.resolve("Test.txt");
+        Files.createFile(tmpFile);
 
         // a file to store the zip archive in
-        File zipFile = null;
+        Path zipFile = Files.createTempFile(tmp.toPath(), "test", ".zip");
 
         // create zip from tmpDir
-        ZipArchiver archiver = null;
-
-        try {
-            zipFile = File.createTempFile("test", ".zip");
-            archiver = new ZipArchiver(Files.newOutputStream(zipFile.toPath()));
-
-            archiver.visit(tmpFile, "foo\\bar\\baz\\Test.txt");
-        } catch (Exception e) {
-            fail("exception driving ZipArchiver", e);
-        } finally {
-            if (archiver != null) {
-                try {
-                    archiver.close();
-                } catch (IOException e) {
-                    // ignored
-                }
-            }
+        try (ZipArchiver archiver = new ZipArchiver(Files.newOutputStream(zipFile))) {
+            archiver.visit(tmpFile.toFile(), "foo\\bar\\baz\\Test.txt");
         }
 
         // examine zip contents and assert that none of the entry names (paths) have
         // back-slashes ("\")
-        String zipEntryName = null;
-
-        try (ZipFile zipFileVerify = new ZipFile(zipFile)) {
-
-            zipEntryName = ((ZipEntry) zipFileVerify.entries().nextElement()).getName();
-        } catch (Exception e) {
-            fail("failure enumerating zip entries", e);
+        try (ZipFile zipFileVerify = new ZipFile(zipFile.toFile())) {
+            assertEquals(1, zipFileVerify.size());
+            ZipEntry zipEntry = zipFileVerify.entries().nextElement();
+            assertEquals("foo/bar/baz/Test.txt", zipEntry.getName());
         }
-
-        assertEquals("foo/bar/baz/Test.txt", zipEntryName);
     }
 
     @Test
-    public void huge64bitFile()  {
+    void huge64bitFile() throws IOException {
         // create huge64bitFileTest.txt
-
-        File hugeFile = new File(tmpDir, "huge64bitFileTest.txt");
-        try {
-            RandomAccessFile largeFile = new RandomAccessFile(hugeFile, "rw");
-            largeFile.setLength(4 * 1024 * 1024 * 1024 + 2);
+        Path hugeFile = newFolder(tmp, "junit").toPath().resolve("huge64bitFileTest.txt");
+        long length = 4L * 1024 * 1024 * 1024 + 2;
+        try (RandomAccessFile largeFile = new RandomAccessFile(hugeFile.toFile(), "rw")) {
+            largeFile.setLength(length);
         } catch (IOException e) {
-            /* We probably don't have enough free disk space
-             * That's ok, we'll skip this test...
-             */
-            LOGGER.log(Level.SEVERE, "Couldn't set up huge file for huge64bitFile test", e);
-            return;
+            // We probably don't have enough free disk space. That's ok, we'll skip this test...
+            assumeTrue(false, e.toString());
         }
 
         // a file to store the zip archive in
-        File zipFile = null;
+        Path zipFile = Files.createTempFile(tmp.toPath(), "test", ".zip");
 
         // create zip from tmpDir
-        ZipArchiver archiver = null;
-
-        try {
-            zipFile = File.createTempFile("test", ".zip");
-            archiver = new ZipArchiver(Files.newOutputStream(zipFile.toPath()));
-
-            archiver.visit(hugeFile, "huge64bitFileTest.txt");
-        } catch (Exception e) {
-            fail("exception driving ZipArchiver", e);
-        } finally {
-            if (archiver != null) {
-                try {
-                    archiver.close();
-                } catch (IOException e) {
-                    // ignored
-                }
-            }
+        try (ZipArchiver archiver = new ZipArchiver(Files.newOutputStream(zipFile))) {
+            archiver.visit(hugeFile.toFile(), "huge64bitFileTest.txt");
         }
 
         // examine zip contents and assert that there's an item there...
-        String zipEntryName = null;
+        try (ZipFile zipFileVerify = new ZipFile(zipFile.toFile())) {
+            assertEquals(1, zipFileVerify.size());
+            ZipEntry zipEntry = zipFileVerify.entries().nextElement();
+            assertEquals("huge64bitFileTest.txt", zipEntry.getName());
+            assertEquals(length, zipEntry.getSize());
+        }
+    }
 
-        try (ZipFile zipFileVerify = new ZipFile(zipFile)) {
+    @Issue("https://github.com/jenkinsci/jenkins/issues/27188")
+    @Test
+    void unreadableFileDoesNotCreateEntry() throws Exception {
+        assumeFalse(Functions.isWindows());
 
-            zipEntryName = ((ZipEntry) zipFileVerify.entries().nextElement()).getName();
-        } catch (Exception e) {
-            fail("failure enumerating zip entries", e);
+        File unreadable = new File(tmp, "unreadable.txt");
+        Files.writeString(unreadable.toPath(), "contents", StandardCharsets.UTF_8);
+        assertTrue(unreadable.setReadable(false));
+        assertFalse(unreadable.canRead());
+
+        Path zipFile = Files.createTempFile(tmp.toPath(), "test", ".zip");
+        ZipArchiver archiver = new ZipArchiver(Files.newOutputStream(zipFile));
+        AccessDeniedException failure;
+        try {
+            failure = assertThrows(AccessDeniedException.class, () -> archiver.visit(unreadable, unreadable.getName()));
+        } finally {
+            unreadable.setReadable(true);
+            archiver.close();
         }
 
-        assertEquals("huge64bitFileTest.txt", zipEntryName);
+        assertEquals(0, failure.getSuppressed().length);
+        try (ZipFile zipFileVerify = new ZipFile(zipFile.toFile())) {
+            assertEquals(0, zipFileVerify.size());
+        }
     }
 
-    /**
-     * Convenience method for failing with a cause.
-     *
-     * @param msg the failure description
-     * @param cause the root cause of the failure
-     */
-    private void fail(final String msg, final Throwable cause) {
-        LOGGER.log(Level.SEVERE, msg, cause);
-        Assert.fail(msg);
-    }
-
-    /**
-     * Recursively deletes a directory and all of its children.
-     *
-     * @param f the File (neé, directory) to delete
-     */
-    private void deleteDir(final File f) {
-        for (File c : f.listFiles()) {
-            if (c.isDirectory()) {
-                deleteDir(c);
-            } else {
-                c.delete();
+    @Disabled("TODO fails to add empty directories to archive")
+    @Issue("JENKINS-49296")
+    @Test
+    void emptyDirectory() throws Exception {
+        Path zip = File.createTempFile("test.zip", null, tmp).toPath();
+        Path root = newFolder(tmp, "junit").toPath();
+        Files.createDirectory(root.resolve("foo"));
+        Files.createDirectory(root.resolve("bar"));
+        Files.writeString(root.resolve("bar/file.txt"), "foobar", StandardCharsets.UTF_8);
+        try (OutputStream out = Files.newOutputStream(zip)) {
+            new FilePath(root.toFile()).zip(out, "**");
+        }
+        Set<String> names = new HashSet<>();
+        try (InputStream is = Files.newInputStream(zip);
+             ZipInputStream zis = new ZipInputStream(is, StandardCharsets.UTF_8)) {
+            ZipEntry ze;
+            while ((ze = zis.getNextEntry()) != null) {
+                names.add(ze.getName());
             }
         }
+        assertEquals(Set.of("foo/", "bar/", "bar/file.txt"), names);
+    }
 
-        f.delete();
+    private static File newFolder(File root, String... subDirs) throws IOException {
+        String subFolder = String.join("/", subDirs);
+        File result = new File(root, subFolder);
+        if (!result.mkdirs()) {
+            throw new IOException("Couldn't create folders " + root);
+        }
+        return result;
     }
 }

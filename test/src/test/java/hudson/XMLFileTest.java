@@ -1,26 +1,33 @@
 package hudson;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
-import org.junit.Rule;
-import org.junit.Test;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.jvnet.hudson.test.recipes.LocalData;
 
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
+@WithJenkins
+class XMLFileTest {
 
-public class XMLFileTest {
+    private JenkinsRule j;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
     @LocalData
-    public void canStartWithXml_1_1_ConfigsTest() {
+    void canStartWithXml_1_1_ConfigsTest() {
 
-        assertThat(j.jenkins.getLabelString(),is("LESS_TERMCAP_mb=\u001B[01;31m"));
+        assertThat(j.jenkins.getLabelString(), is("LESS_TERMCAP_mb=\u001B[01;31m"));
 
     }
 
@@ -31,7 +38,7 @@ public class XMLFileTest {
      */
     @Test
     @LocalData
-    public void silentlyMigrateConfigsTest() throws Exception {
+    void silentlyMigrateConfigsTest() throws Exception {
         j.jenkins.save();
         // verify that we did indeed load our test config.xml
         assertThat(j.jenkins.getLabelString(), is("I am a label"));
@@ -39,7 +46,7 @@ public class XMLFileTest {
         File configFile = new File(j.jenkins.getRootDir(), "config.xml");
         assertThat(configFile.exists(), is(true));
 
-        try (BufferedReader config = new BufferedReader(new FileReader(configFile))) {
+        try (BufferedReader config = Files.newBufferedReader(configFile.toPath(), StandardCharsets.UTF_8)) {
             assertThat(config.readLine(), is("<?xml version='1.1' encoding='UTF-8'?>"));
         }
     }

@@ -25,7 +25,8 @@
 package jenkins.security;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSet;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.ExtensionList;
 import hudson.Main;
 import hudson.remoting.ClassFilter;
@@ -51,13 +52,12 @@ import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
 import jenkins.model.Jenkins;
 import jenkins.util.SystemProperties;
 import org.apache.commons.io.IOUtils;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.HttpResponse;
 
 /**
  * Customized version of {@link ClassFilter#DEFAULT}.
@@ -88,9 +88,9 @@ public class ClassFilterImpl extends ClassFilter {
         }
         ClassFilter.setDefault(new ClassFilterImpl());
         if (SUPPRESS_ALL) {
-            LOGGER.warning("All class filtering suppressed. Your Jenkins installation is at risk from known attacks. See https://jenkins.io/redirect/class-filter/");
+            LOGGER.warning("All class filtering suppressed. Your Jenkins installation is at risk from known attacks. See https://www.jenkins.io/redirect/class-filter/");
         } else if (SUPPRESS_WHITELIST) {
-            LOGGER.warning("JEP-200 class filtering by whitelist suppressed. Your Jenkins installation may be at risk. See https://jenkins.io/redirect/class-filter/");
+            LOGGER.warning("JEP-200 class filtering by whitelist suppressed. Your Jenkins installation may be at risk. See https://www.jenkins.io/redirect/class-filter/");
         }
     }
 
@@ -102,7 +102,7 @@ public class ClassFilterImpl extends ClassFilter {
     }
 
     private static void mockOff() {
-        LOGGER.warning("Disabling class filtering since we appear to be in a special test environment, perhaps Mockito/PowerMock");
+        LOGGER.warning("Disabling class filtering since we appear to be in a special test environment, perhaps Mockito");
         ClassFilter.setDefault(ClassFilter.NONE); // even Method on the standard blacklist is going to explode
     }
 
@@ -115,9 +115,10 @@ public class ClassFilterImpl extends ClassFilter {
     private final Map<String, Boolean> codeSourceCache = Collections.synchronizedMap(new HashMap<>());
     /** Names of classes outside Jenkins core or plugins which have a special serial form but are considered safe. */
     static final Set<String> WHITELISTED_CLASSES;
+
     static {
         try (InputStream is = ClassFilterImpl.class.getResourceAsStream("whitelisted-classes.txt")) {
-            WHITELISTED_CLASSES = ImmutableSet.copyOf(IOUtils.readLines(is, StandardCharsets.UTF_8).stream().filter(line -> !line.matches("#.*|\\s*")).collect(Collectors.toSet()));
+            WHITELISTED_CLASSES = IOUtils.readLines(is, StandardCharsets.UTF_8).stream().filter(line -> !line.matches("#.*|\\s*")).collect(Collectors.toUnmodifiableSet());
         } catch (IOException x) {
             throw new ExceptionInInitializerError(x);
         }
@@ -151,6 +152,10 @@ public class ClassFilterImpl extends ClassFilter {
                 return false;
             }
             if (Throwable.class.isAssignableFrom(c)) {
+                if (HttpResponse.class.isAssignableFrom(c)) {
+                    notifyRejected(_c, name, String.format("Rejecting %s Throwable implementing HttpResponse during remote deserialization", name));
+                    return true;
+                }
                 LOGGER.log(Level.FINE, "permitting {0} since it is a throwable", name);
                 return false;
             }
@@ -177,17 +182,18 @@ public class ClassFilterImpl extends ClassFilter {
             }
             if (SUPPRESS_WHITELIST || SUPPRESS_ALL) {
                 notifyRejected(_c, null,
-                        String.format("%s in %s might be dangerous, so would normally be rejected; see https://jenkins.io/redirect/class-filter/", name, location != null ?location : "JRE"));
+                        String.format("%s in %s might be dangerous, so would normally be rejected; see https://www.jenkins.io/redirect/class-filter/", name, location != null ? location : "JRE"));
 
                 return false;
             }
             notifyRejected(_c, null,
-                    String.format("%s in %s might be dangerous, so rejecting; see https://jenkins.io/redirect/class-filter/", name, location != null ?location : "JRE"));
+                    String.format("%s in %s might be dangerous, so rejecting; see https://www.jenkins.io/redirect/class-filter/", name, location != null ? location : "JRE"));
             return true;
         });
     }
 
     private static final Pattern CLASSES_JAR = Pattern.compile("(file:/.+/)WEB-INF/lib/classes[.]jar");
+
     private boolean isLocationWhitelisted(String _loc) {
         return codeSourceCache.computeIfAbsent(_loc, loc -> {
             if (loc.equals(JENKINS_LOC)) {
@@ -316,11 +322,11 @@ public class ClassFilterImpl extends ClassFilter {
         if (ClassFilter.STANDARD.isBlacklisted(name)) {
             if (SUPPRESS_ALL) {
                 notifyRejected(null, name,
-                        String.format("would normally reject %s according to standard blacklist; see https://jenkins.io/redirect/class-filter/", name));
+                        String.format("would normally reject %s according to standard blacklist; see https://www.jenkins.io/redirect/class-filter/", name));
                 return false;
             }
             notifyRejected(null, name,
-                    String.format("rejecting %s according to standard blacklist; see https://jenkins.io/redirect/class-filter/", name));
+                    String.format("rejecting %s according to standard blacklist; see https://www.jenkins.io/redirect/class-filter/", name));
             return true;
         } else {
             return false;

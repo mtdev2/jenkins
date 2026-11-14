@@ -24,22 +24,29 @@
 
 package hudson.cli;
 
-import org.junit.Test;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.hamcrest.MatcherAssert.assertThat;
-import org.junit.Rule;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class InstallPluginCommandTest {
+@WithJenkins
+class InstallPluginCommandTest {
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
+    private JenkinsRule r;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
 
     @Issue("JENKINS-41745")
     @Test
-    public void fromStdin() throws Exception {
+    void fromStdin() {
         assertNull(r.jenkins.getPluginManager().getPlugin("token-macro"));
         assertThat(new CLICommandInvoker(r, "install-plugin").
                 withStdin(InstallPluginCommandTest.class.getResourceAsStream("/plugins/token-macro.hpi")).

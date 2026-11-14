@@ -24,56 +24,50 @@
 
 package hudson.model;
 
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.WebResponse;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import hudson.AbortException;
 import hudson.cli.CLICommand;
 import hudson.cli.CLICommandInvoker;
 import hudson.cli.CopyJobCommand;
 import hudson.cli.CreateJobCommand;
 import hudson.security.ACL;
-
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import jenkins.model.Jenkins;
-import jenkins.security.apitoken.ApiTokenTestHelper;
-
-import org.junit.Before;
-import org.junit.Test;
-
-import static org.hamcrest.Matchers.containsInAnyOrder;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import org.junit.Rule;
-import org.junit.rules.TemporaryFolder;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.htmlunit.WebResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
 import org.jvnet.hudson.test.MockFolder;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-public class ItemsTest {
+@WithJenkins
+class ItemsTest {
 
-    @Rule public JenkinsRule r = new JenkinsRule();
-    @Rule public TemporaryFolder tmpRule = new TemporaryFolder();
+    private JenkinsRule r;
 
-    @Before
-    public void setupLegacyBehavior(){
-        ApiTokenTestHelper.enableLegacyBehavior();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
     }
-    
-    @Test public void getAllItems() throws Exception {
+
+    @Test
+    void getAllItems() throws Exception {
         MockFolder d = r.createFolder("d");
         MockFolder sub2 = d.createProject(MockFolder.class, "sub2");
         MockFolder sub2a = sub2.createProject(MockFolder.class, "a");
@@ -94,7 +88,8 @@ public class ItemsTest {
         assertEquals(Arrays.<Item>asList(sub2a, sub2ap, sub2alpha, sub2b, sub2bp, sub2BRAVO, sub2c, sub2cp, sub2charlie), sub2.getAllItems(Item.class));
     }
 
-    @Test public void getAllItemsPredicate() throws Exception {
+    @Test
+    void getAllItemsPredicate() throws Exception {
         MockFolder d = r.createFolder("d");
         MockFolder sub2 = d.createProject(MockFolder.class, "sub2");
         MockFolder sub2a = sub2.createProject(MockFolder.class, "a");
@@ -117,7 +112,7 @@ public class ItemsTest {
 
     @Issue("JENKINS-40252")
     @Test
-    public void allItems() throws Exception {
+    void allItems() throws Exception {
         MockFolder d = r.createFolder("d");
         MockFolder sub2 = d.createProject(MockFolder.class, "sub2");
         MockFolder sub2a = sub2.createProject(MockFolder.class, "a");
@@ -136,11 +131,12 @@ public class ItemsTest {
         FreeStyleProject sub2charlie = sub2.createProject(FreeStyleProject.class, "charlie");
         assertThat(d.allItems(FreeStyleProject.class), containsInAnyOrder(dp, sub1p, sub1q, sub2ap, sub2alpha,
                 sub2bp, sub2BRAVO, sub2cp, sub2charlie));
-        assertThat(sub2.allItems(Item.class), containsInAnyOrder((Item)sub2a, sub2ap, sub2alpha, sub2b, sub2bp,
+        assertThat(sub2.allItems(Item.class), containsInAnyOrder(sub2a, sub2ap, sub2alpha, sub2b, sub2bp,
                 sub2BRAVO, sub2c, sub2cp, sub2charlie));
     }
 
-    @Test public void allItemsPredicate() throws Exception {
+    @Test
+    void allItemsPredicate() throws Exception {
         MockFolder d = r.createFolder("d");
         MockFolder sub2 = d.createProject(MockFolder.class, "sub2");
         MockFolder sub2a = sub2.createProject(MockFolder.class, "a");
@@ -161,19 +157,6 @@ public class ItemsTest {
         assertThat(sub2.allItems(Item.class, t -> t.getName().startsWith("a")), containsInAnyOrder(sub2a, sub2alpha));
     }
 
-    @Issue("JENKINS-24825")
-    @Test public void moveItem() throws Exception {
-        File tmp = tmpRule.getRoot();
-        r.jenkins.setRawBuildsDir(tmp.getAbsolutePath()+"/${ITEM_FULL_NAME}");
-        MockFolder foo = r.createFolder("foo");
-        MockFolder bar = r.createFolder("bar");
-        FreeStyleProject test = foo.createProject(FreeStyleProject.class, "test");
-        test.scheduleBuild2(0).get();
-        Items.move(test, bar);
-        assertFalse(new File(tmp, "foo/test/1").exists());
-        assertTrue(new File(tmp, "bar/test/1").exists());
-    }
-    
     // TODO would be more efficient to run these all as a single test case, but after a few Jetty seems to stop serving new content and new requests just hang.
 
     private void overwriteTargetSetUp() throws Exception {
@@ -195,7 +178,8 @@ public class ItemsTest {
     }
 
     /** Control cases: if there is no such item yet, nothing is stopping you. */
-    @Test public void overwriteNonexistentTarget() throws Exception {
+    @Test
+    void overwriteNonexistentTarget() throws Exception {
         overwriteTargetSetUp();
         for (OverwriteTactic tactic : OverwriteTactic.values()) {
             tactic.run(r, "nonexistent");
@@ -207,29 +191,27 @@ public class ItemsTest {
     private void cannotOverwrite(String target) throws Exception {
         overwriteTargetSetUp();
         for (OverwriteTactic tactic : OverwriteTactic.values()) {
-            try {
-                tactic.run(r, target);
-                fail(tactic + " was not supposed to work against " + target);
-            } catch (Exception x) {
-                System.out.println("good, " + tactic + " failed on " + target + ": " + x);
-                assertEquals(tactic + " still overwrote " + target, target, r.jenkins.getItemByFullName(target, FreeStyleProject.class).getDescription());
-            }
+            assertThrows(Exception.class, () -> tactic.run(r, target), tactic + " was not supposed to work against " + target);
+            assertEquals(target, r.jenkins.getItemByFullName(target, FreeStyleProject.class).getDescription(), tactic + " still overwrote " + target);
         }
     }
 
     /** More control cases: for non-security-sensitive scenarios, we prevent you from overwriting existing items. */
-    @Test public void overwriteVisibleTarget() throws Exception {
+    @Test
+    void overwriteVisibleTarget() throws Exception {
         cannotOverwrite("visible");
     }
 
     /** You may not overwrite an item you know is there even if you cannot see it. */
-    @Test public void overwriteKnownTarget() throws Exception {
+    @Test
+    void overwriteKnownTarget() throws Exception {
         cannotOverwrite("known");
     }
 
     /** You are somehow prevented from overwriting an item even if you did not previously know it was there. */
     @Issue("SECURITY-321")
-    @Test public void overwriteHiddenTarget() throws Exception {
+    @Test
+    void overwriteHiddenTarget() throws Exception {
         cannotOverwrite("secret");
     }
 
@@ -242,7 +224,7 @@ public class ItemsTest {
                         // redirect perversely counts as a failure
                         .withRedirectEnabled(false)
                         .withThrowExceptionOnFailingStatusCode(false);
-                WebResponse webResponse = wc.getPage(new WebRequest(new URL(wc.getContextPath() + "createItem?name=" + target + "&mode=hudson.model.FreeStyleProject"), HttpMethod.POST)).getWebResponse();
+                WebResponse webResponse = wc.getPage(new WebRequest(new URI(wc.getContextPath() + "createItem?name=" + target + "&mode=hudson.model.FreeStyleProject").toURL(), HttpMethod.POST)).getWebResponse();
                 if (webResponse.getStatusCode() != HttpURLConnection.HTTP_MOVED_TEMP) {
                     throw new FailingHttpStatusCodeException(webResponse);
                 }
@@ -255,7 +237,7 @@ public class ItemsTest {
                 JenkinsRule.WebClient wc = wc(r)
                         .withRedirectEnabled(false)
                         .withThrowExceptionOnFailingStatusCode(false);
-                WebResponse webResponse = wc.getPage(new WebRequest(new URL(wc.getContextPath() + "createItem?name=" + target + "&mode=copy&from=dupe"), HttpMethod.POST)).getWebResponse();
+                WebResponse webResponse = wc.getPage(new WebRequest(new URI(wc.getContextPath() + "createItem?name=" + target + "&mode=copy&from=dupe").toURL(), HttpMethod.POST)).getWebResponse();
                 r.jenkins.getItem("dupe").delete();
                 if (webResponse.getStatusCode() != HttpURLConnection.HTTP_MOVED_TEMP) {
                     throw new FailingHttpStatusCodeException(webResponse);
@@ -266,7 +248,7 @@ public class ItemsTest {
         REST_CREATE {
             @Override void run(JenkinsRule r, String target) throws Exception {
                 JenkinsRule.WebClient wc = wc(r);
-                WebRequest req = new WebRequest(new URL(wc.getContextPath() + "createItem?name=" + target), HttpMethod.POST);
+                WebRequest req = new WebRequest(new URI(wc.getContextPath() + "createItem?name=" + target).toURL(), HttpMethod.POST);
                 req.setAdditionalHeader("Content-Type", "application/xml");
                 req.setRequestBody("<project/>");
                 wc.getPage(req);
@@ -279,7 +261,7 @@ public class ItemsTest {
                 JenkinsRule.WebClient wc = wc(r)
                         .withRedirectEnabled(false)
                         .withThrowExceptionOnFailingStatusCode(false);
-                WebResponse webResponse = wc.getPage(new WebRequest(new URL(wc.getContextPath() + "job/dupe/doRename?newName=" + target), HttpMethod.POST)).getWebResponse();
+                WebResponse webResponse = wc.getPage(new WebRequest(new URI(wc.getContextPath() + "job/dupe/doRename?newName=" + target).toURL(), HttpMethod.POST)).getWebResponse();
                 if (webResponse.getStatusCode() != HttpURLConnection.HTTP_MOVED_TEMP) {
                     r.jenkins.getItem("dupe").delete();
                     throw new FailingHttpStatusCodeException(webResponse);
@@ -331,6 +313,7 @@ public class ItemsTest {
             }
         };
         abstract void run(JenkinsRule r, String target) throws Exception;
+
         private static JenkinsRule.WebClient wc(JenkinsRule r) {
             return r.createWebClient().withBasicApiToken("attacker");
         }

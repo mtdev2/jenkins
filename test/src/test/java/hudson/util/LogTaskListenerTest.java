@@ -21,28 +21,36 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import hudson.console.HyperlinkNote;
 import hudson.model.TaskListener;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-import org.junit.Rule;
+import jenkins.security.MasterToSlaveCallable;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.LoggerRule;
+import org.jvnet.hudson.test.LogRecorder;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class LogTaskListenerTest {
+@WithJenkins
+class LogTaskListenerTest {
 
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
+    private final LogRecorder logging = new LogRecorder().record("LogTaskListenerTest", Level.ALL).capture(100);
 
-    @Rule
-    public LoggerRule logging = new LoggerRule().record("LogTaskListenerTest", Level.ALL).capture(100);
+    private JenkinsRule r;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
 
     @Test
-    public void annotations() throws Exception {
+    void annotations() throws Exception {
         TaskListener l = new LogTaskListener(Logger.getLogger("LogTaskListenerTest"), Level.FINE);
         l.getLogger().println("plain line");
         String url = "http://nowhere.net/";
@@ -52,6 +60,30 @@ public class LogTaskListenerTest {
         l.getLogger().println();
         l.getLogger().println(HyperlinkNote.encodeTo(url, "there") + " from encoded");
         assertEquals("[plain line, from annotate, from hyperlink, there from encoded]", logging.getMessages().toString());
+    }
+
+    @Test
+    void serialization() throws Exception {
+        TaskListener l = new LogTaskListener(Logger.getLogger("LogTaskListenerTest"), Level.INFO);
+        r.createOnlineSlave().getChannel().call(new Log(l));
+        assertEquals("[from agent]", logging.getMessages().toString());
+    }
+
+    private static final class Log extends MasterToSlaveCallable<Void, RuntimeException> {
+
+        private final TaskListener l;
+
+        Log(TaskListener l) {
+            this.l = l;
+        }
+
+        @Override
+        public Void call() throws RuntimeException {
+            l.getLogger().println("from agent");
+            l.getLogger().flush();
+            return null;
+        }
+
     }
 
 }

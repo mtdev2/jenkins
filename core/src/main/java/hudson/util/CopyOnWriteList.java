@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,9 +21,11 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
 import com.thoughtworks.xstream.XStreamException;
+import com.thoughtworks.xstream.converters.ConversionException;
 import com.thoughtworks.xstream.converters.Converter;
 import com.thoughtworks.xstream.converters.MarshallingContext;
 import com.thoughtworks.xstream.converters.UnmarshallingContext;
@@ -31,16 +33,14 @@ import com.thoughtworks.xstream.converters.collections.AbstractCollectionConvert
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 import com.thoughtworks.xstream.mapper.Mapper;
-
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Arrays;
-
 import jenkins.util.xstream.CriticalXStreamException;
-
 
 /**
  * {@link List}-like implementation that has copy-on-write semantics.
@@ -55,7 +55,7 @@ public class CopyOnWriteList<E> implements Iterable<E> {
     private volatile List<? extends E> core;
 
     public CopyOnWriteList(List<E> core) {
-        this(core,false);
+        this(core, false);
     }
 
     private CopyOnWriteList(List<E> core, boolean noCopy) {
@@ -95,16 +95,20 @@ public class CopyOnWriteList<E> implements Iterable<E> {
     /**
      * Returns an iterator.
      */
+    @Override
     public Iterator<E> iterator() {
         final Iterator<? extends E> itr = core.iterator();
-        return new Iterator<E>() {
+        return new Iterator<>() {
             private E last;
+
+            @Override
             public boolean hasNext() {
                 return itr.hasNext();
             }
 
+            @Override
             public E next() {
-                return last=itr.next();
+                return last = itr.next();
             }
 
             @Override
@@ -139,7 +143,7 @@ public class CopyOnWriteList<E> implements Iterable<E> {
         this.core = new ArrayList<>();
     }
 
-    public <E> E[] toArray(E[] array) {
+    public <T> T[] toArray(T[] array) {
         return core.toArray(array);
     }
 
@@ -175,19 +179,44 @@ public class CopyOnWriteList<E> implements Iterable<E> {
      * {@link Converter} implementation for XStream.
      */
     public static final class ConverterImpl extends AbstractCollectionConverter {
+        /**
+         * When available, this field holds the declared element type of the CopyOnWriteList being deserialized.
+         */
+        private final @CheckForNull Class<?> elementType;
+
         public ConverterImpl(Mapper mapper) {
+            this(mapper, null);
+        }
+
+        /**
+         * Creates a converter that will validate the types of list elements during deserialization.
+         * <p>Elements with invalid types will be omitted from deserialized lists and may result in an
+         * {@link hudson.diagnosis.OldDataMonitor} warning.
+         *
+         * @param mapper the XStream mapper
+         * @param elementType the expected element type, or null to skip type checking
+         */
+        ConverterImpl(Mapper mapper, Class<?> elementType) {
             super(mapper);
+            this.elementType = elementType;
         }
 
+        @Override
         public boolean canConvert(Class type) {
-            return type==CopyOnWriteList.class;
+            return canConvertRobust(type);
         }
 
+        static boolean canConvertRobust(Class<?> type) {
+            return type == CopyOnWriteList.class;
+        }
+
+        @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
             for (Object o : (CopyOnWriteList) source)
                 writeItem(o, context, writer);
         }
 
+        @Override
         @SuppressWarnings("unchecked")
         public CopyOnWriteList unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
             // read the items from xml into a list
@@ -196,7 +225,17 @@ public class CopyOnWriteList<E> implements Iterable<E> {
                 reader.moveDown();
                 try {
                     Object item = readItem(reader, context, items);
-                    items.add(item);
+                    if (elementType != null && item != null && !elementType.isInstance(item)) {
+                        var exception = new ConversionException("Invalid type for CopyOnWriteList element");
+                        // c.f. TreeUnmarshaller.addInformationTo
+                        exception.add("required-type", elementType.getName());
+                        exception.add("class", item.getClass().getName());
+                        exception.add("converter-type", getClass().getName());
+                        reader.appendErrors(exception);
+                        RobustReflectionConverter.addErrorInContext(context, exception);
+                    } else {
+                        items.add(item);
+                    }
                 } catch (CriticalXStreamException e) {
                     throw e;
                 } catch (XStreamException | LinkageError e) {
@@ -205,7 +244,7 @@ public class CopyOnWriteList<E> implements Iterable<E> {
                 reader.moveUp();
             }
 
-            return new CopyOnWriteList(items,true);
+            return new CopyOnWriteList(items, true);
         }
     }
 

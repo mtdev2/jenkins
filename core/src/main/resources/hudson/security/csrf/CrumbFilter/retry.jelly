@@ -25,14 +25,15 @@ THE SOFTWARE.
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
     <st:statusCode value="405"/>
-    <l:layout norefresh="true" title="${%Method Not Allowed}">
+    <st:header name="Allow" value="POST" />
+    <l:layout title="${%Method Not Allowed}">
 
         <l:main-panel>
             <h1>${%This URL requires POST}</h1>
             <p>
                 ${%blurb}
             </p>
-            <p><tt>${requestURL}</tt></p>
+            <p><code>${requestURL}</code></p>
             <p><strong>${%warning}</strong></p>
             <f:form method="post" name="retry">
                 <f:submit value="${%Retry using POST}"/>

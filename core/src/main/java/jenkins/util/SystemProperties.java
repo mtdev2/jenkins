@@ -21,8 +21,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.util;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.Nullable;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.EnvVars;
 import hudson.Extension;
@@ -31,7 +35,12 @@ import hudson.model.Computer;
 import hudson.model.TaskListener;
 import hudson.remoting.Channel;
 import hudson.slaves.ComputerListener;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.ServletContextEvent;
+import jakarta.servlet.ServletContextListener;
 import java.io.IOException;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -39,27 +48,21 @@ import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.servlet.ServletContext;
-import javax.servlet.ServletContextEvent;
-import javax.servlet.ServletContextListener;
 import jenkins.security.MasterToSlaveCallable;
-
 import jenkins.util.io.OnMaster;
-import org.apache.commons.lang.StringUtils;
+import org.jenkinsci.remoting.util.DurationStyle;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Centralizes calls to {@link System#getProperty(String)} and related calls.
  * This allows us to get values not just from environment variables but also from
- * the {@link ServletContext}, so properties like {@code hudson.DNSMultiCast.disabled}
+ * the {@link ServletContext}, so properties like {@code jenkins.whatever.Clazz.disabled}
  * can be set in {@code context.xml} and the app server's boot script does not
  * have to be changed.
  *
  * <p>This should be used to obtain hudson/jenkins "app"-level parameters
- * (e.g. {@code hudson.DNSMultiCast.disabled}), but not for system parameters
+ * (e.g. {@code jenkins.whatever.Clazz.disabled}), but not for system parameters
  * (e.g. {@code os.name}).
  *
  * <p>If you run multiple instances of Jenkins in the same virtual machine and wish
@@ -88,6 +91,7 @@ public class SystemProperties {
 
     private static final Handler NULL_HANDLER = key -> null;
 
+    @SuppressFBWarnings(value = "NP_NONNULL_FIELD_NOT_INITIALIZED_IN_CONSTRUCTOR", justification = "the field is initialized by a static initializer, not a constructor")
     private static @NonNull Handler handler = NULL_HANDLER;
 
     // declared in WEB-INF/web.xml
@@ -101,7 +105,7 @@ public class SystemProperties {
         public void contextInitialized(ServletContextEvent event) {
             ServletContext theContext = event.getServletContext();
             handler = key -> {
-                if (StringUtils.isNotBlank(key)) {
+                if (key != null && !key.isBlank()) {
                     try {
                         return theContext.getInitParameter(key);
                     } catch (SecurityException ex) {
@@ -138,9 +142,11 @@ public class SystemProperties {
         public void preOnline(Computer c, Channel channel, FilePath root, TaskListener listener) throws IOException, InterruptedException {
             channel.call(new CopySystemProperties());
         }
+
         private static final class CopySystemProperties extends MasterToSlaveCallable<Void, RuntimeException> {
             private static final long serialVersionUID = 1;
             private final Map<String, String> snapshot;
+
             CopySystemProperties() {
                 // Take a snapshot of those system properties and context variables available on the master at the time the agent starts which have been whitelisted for that purpose.
                 snapshot = new HashMap<>();
@@ -149,17 +155,21 @@ public class SystemProperties {
                 }
                 LOGGER.log(Level.FINE, "taking snapshot of {0}", snapshot);
             }
+
             @Override
             public Void call() throws RuntimeException {
                 handler = new CopiedHandler(snapshot);
                 return null;
             }
         }
+
         private static final class CopiedHandler implements Handler {
             private final Map<String, String> snapshot;
+
             CopiedHandler(Map<String, String> snapshot) {
                 this.snapshot = snapshot;
             }
+
             @Override
             public String getString(String key) {
                 return snapshot.get(key);
@@ -178,7 +188,7 @@ public class SystemProperties {
      * Gets the system property indicated by the specified key.
      * This behaves just like {@link System#getProperty(java.lang.String)}, except that it
      * also consults the {@link ServletContext}'s "init" parameters.
-     * 
+     *
      * @param      key   the name of the system property.
      * @return     the string value of the system property,
      *             or {@code null} if there is no property with that key.
@@ -195,7 +205,7 @@ public class SystemProperties {
      * Gets the system property indicated by the specified key, or a default value.
      * This behaves just like {@link System#getProperty(java.lang.String, java.lang.String)}, except
      * that it also consults the {@link ServletContext}'s "init" parameters.
-     * 
+     *
      * @param      key   the name of the system property.
      * @param      def   a default value.
      * @return     the string value of the system property,
@@ -229,8 +239,8 @@ public class SystemProperties {
                 LOGGER.log(logLevel, "Property (system): {0} => {1}", new Object[] {key, value});
             }
             return value;
-        } 
-        
+        }
+
         value = handler.getString(key);
         if (value != null) {
             if (LOGGER.isLoggable(logLevel)) {
@@ -238,7 +248,7 @@ public class SystemProperties {
             }
             return value;
         }
-        
+
         value = def;
         if (LOGGER.isLoggable(logLevel)) {
             LOGGER.log(logLevel, "Property (default): {0} => {1}", new Object[] {key, value});
@@ -252,13 +262,13 @@ public class SystemProperties {
       * {@code "true"}. If the system property does not exist, return
       * {@code "false"}. if a property by this name exists in the {@link ServletContext}
       * and is equal to the string {@code "true"}.
-      * 
+      *
       * This behaves just like {@link Boolean#getBoolean(java.lang.String)}, except that it
       * also consults the {@link ServletContext}'s "init" parameters.
-      * 
+      *
       * @param   name   the system property name.
       * @return  the {@code boolean} value of the system property.
-      */  
+      */
     public static boolean getBoolean(String name) {
         return getBoolean(name, false);
     }
@@ -270,17 +280,17 @@ public class SystemProperties {
       * {@code "true"} if a property by this name exists in the {@link ServletContext}
       * and is equal to the string {@code "true"}. If that property does not
       * exist either, return the default value.
-      * 
+      *
       * This behaves just like {@link Boolean#getBoolean(java.lang.String)} with a default
       * value, except that it also consults the {@link ServletContext}'s "init" parameters.
-      * 
+      *
       * @param   name   the system property name.
       * @param   def   a default value.
       * @return  the {@code boolean} value of the system property.
       */
     public static boolean getBoolean(String name, boolean def) {
         String v = getString(name);
-       
+
         if (v != null) {
             return Boolean.parseBoolean(v);
         }
@@ -301,14 +311,71 @@ public class SystemProperties {
         String v = getString(name);
         return v == null ? null : Boolean.parseBoolean(v);
     }
-    
+
+    /**
+     * Determines the duration value of the system property with the specified name.
+     * @param name property name.
+     * @return the property value as a duration.
+     * @since 2.516
+     */
+    @CheckForNull
+    public static Duration getDuration(@NonNull String name) {
+        return getDuration(name, (Duration) null);
+    }
+
+    /**
+     * Determines the duration value of the system property with the specified name.
+     * @param name property name.
+     * @param unit the duration unit to use if the value doesn't specify one (defaults to `ms`)
+     * @return the property value as a duration.
+     * @since 2.516
+     */
+    @CheckForNull
+    public static Duration getDuration(@NonNull String name, @CheckForNull ChronoUnit unit) {
+        return getDuration(name, unit, null);
+    }
+
+    /**
+     * Determines the duration value of the system property with the specified name, or a default value.
+     * @param name property name.
+     * @param defaultValue a default value
+     * @return the property value as a duration.
+     * @since 2.516
+     */
+    @Nullable
+    public static Duration getDuration(@NonNull String name, @CheckForNull Duration defaultValue) {
+        return getDuration(name, null, defaultValue);
+    }
+
+    /**
+     * Determines the duration value of the system property with the specified name, or a default value.
+     *
+     * @param name         property name.
+     * @param unit         the duration unit to use if the value doesn't specify one (defaults to `ms`)
+     * @param defaultValue a default value
+     * @return the property value as a duration.
+     * @since 2.516
+     */
+    @Nullable
+    public static Duration getDuration(@NonNull String name, @CheckForNull ChronoUnit unit, @CheckForNull Duration defaultValue) {
+        String v = getString(name);
+        if (v != null) {
+            try {
+                return DurationStyle.detectAndParse(v, unit);
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, e, () -> "Failed to convert \"%s\" to a valid duration for property \"%s\", falling back to default \"%s\"".formatted(v, name, defaultValue));
+            }
+        }
+        return defaultValue;
+    }
+
     /**
       * Determines the integer value of the system property with the
       * specified name.
-      * 
+      *
       * This behaves just like {@link Integer#getInteger(java.lang.String)}, except that it
       * also consults the {@link ServletContext}'s "init" parameters.
-      * 
+      *
       * @param   name property name.
       * @return  the {@code Integer} value of the property.
       */
@@ -338,11 +405,11 @@ public class SystemProperties {
     /**
       * Determines the integer value of the system property with the
       * specified name, or a default value.
-      * 
+      *
       * This behaves just like {@code Integer.getInteger(String,Integer)}, except that it
       * also consults the {@code ServletContext}'s "init" parameters. If neither exist,
-      * return the default value. 
-      * 
+      * return the default value.
+      *
       * @param   name property name.
       * @param   def   a default value.
       * @param   logLevel the level of the log if the provided system property name cannot be decoded into Integer.
@@ -352,7 +419,7 @@ public class SystemProperties {
       */
     public static Integer getInteger(String name, Integer def, Level logLevel) {
         String v = getString(name);
-       
+
         if (v != null) {
             try {
                 return Integer.decode(v);
@@ -365,14 +432,14 @@ public class SystemProperties {
         }
         return def;
     }
-    
+
     /**
       * Determines the long value of the system property with the
       * specified name.
-      * 
+      *
       * This behaves just like {@link Long#getLong(java.lang.String)}, except that it
       * also consults the {@link ServletContext}'s "init" parameters.
-      * 
+      *
       * @param   name property name.
       * @return  the {@code Long} value of the property.
       */
@@ -402,11 +469,11 @@ public class SystemProperties {
     /**
       * Determines the integer value of the system property with the
       * specified name, or a default value.
-      * 
+      *
       * This behaves just like {@link Long#getLong(String, Long)}, except that it
       * also consults the {@link ServletContext}'s "init" parameters. If neither exist,
-      * return the default value. 
-      * 
+      * return the default value.
+      *
       * @param   name property name.
       * @param   def   a default value.
       * @param   logLevel the level of the log if the provided system property name cannot be decoded into Long.
@@ -416,7 +483,7 @@ public class SystemProperties {
       */
     public static Long getLong(String name, Long def, Level logLevel) {
         String v = getString(name);
-       
+
         if (v != null) {
             try {
                 return Long.decode(v);

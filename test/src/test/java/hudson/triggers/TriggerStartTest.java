@@ -24,6 +24,9 @@
 
 package hudson.triggers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 import hudson.model.AbstractProject;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
@@ -31,25 +34,32 @@ import hudson.model.Items;
 import java.io.ByteArrayInputStream;
 import java.io.ObjectStreamException;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import javax.xml.transform.Source;
 import javax.xml.transform.stream.StreamSource;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 @Issue("JENKINS-14759")
-public class TriggerStartTest {
+@WithJenkins
+class TriggerStartTest {
 
-    @Rule public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Test public void loadCallsStartFalse() throws Exception {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
+    @Test
+    void loadCallsStartFalse() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         MockTrigger t = new MockTrigger();
         p.addTrigger(t);
@@ -60,18 +70,20 @@ public class TriggerStartTest {
         assertEquals("[false]", t.calls.toString());
     }
 
-    @Test public void submitCallsStartTrue() throws Exception {
+    @Test
+    void submitCallsStartTrue() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         MockTrigger t = new MockTrigger();
         p.addTrigger(t);
         p.save();
-        p = (FreeStyleProject)j.configRoundtrip((Item)p);
+        p = (FreeStyleProject) j.configRoundtrip((Item) p);
         t = p.getTrigger(MockTrigger.class);
         assertNotNull(t);
         assertEquals("[true]", t.calls.toString());
     }
 
-    @Test public void updateByXmlCallsStartTrue() throws Exception {
+    @Test
+    void updateByXmlCallsStartTrue() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         String xml = p.getConfigFile().asString();
         xml = xml.replace("  <triggers/>\n", triggersSection());
@@ -82,15 +94,19 @@ public class TriggerStartTest {
         assertEquals("[true]", t.calls.toString());
     }
 
-    @Test public void createProjectFromXmlCallsStartTrue() throws Exception {
-        FreeStyleProject p = (FreeStyleProject) j.jenkins.createProjectFromXML("whatever", new ByteArrayInputStream(("<project>\n  <builders/>\n  <publishers/>\n  <buildWrappers/>\n" + triggersSection() + "</project>").getBytes()));
+    @Test
+    void createProjectFromXmlCallsStartTrue() throws Exception {
+        FreeStyleProject p = (FreeStyleProject) j.jenkins.createProjectFromXML(
+                "whatever",
+                new ByteArrayInputStream(("<project>\n  <builders/>\n  <publishers/>\n  <buildWrappers/>\n" + triggersSection() + "</project>").getBytes(StandardCharsets.UTF_8)));
         MockTrigger t = p.getTrigger(MockTrigger.class);
         assertNotNull(t);
         assertEquals("[true]", t.calls.toString());
     }
 
-    @Test public void copyCallsStartTrue() throws Exception {
-        AbstractProject<?,?> p = j.createFreeStyleProject();
+    @Test
+    void copyCallsStartTrue() throws Exception {
+        AbstractProject<?, ?> p = j.createFreeStyleProject();
         MockTrigger t = new MockTrigger();
         p.addTrigger(t);
         p.save();
@@ -109,7 +125,9 @@ public class TriggerStartTest {
 
         public transient List<Boolean> calls = new ArrayList<>();
 
-        @DataBoundConstructor public MockTrigger() {}
+        @SuppressWarnings("checkstyle:redundantmodifier")
+        @DataBoundConstructor
+        public MockTrigger() {}
 
         @Override public void start(Item project, boolean newInstance) {
             super.start(project, newInstance);

@@ -24,46 +24,54 @@
 
 package hudson.model;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 import hudson.FilePath;
 import hudson.remoting.VirtualChannel;
 import hudson.scm.NullSCM;
 import hudson.slaves.DumbSlave;
 import hudson.slaves.WorkspaceList;
 import hudson.util.StreamTaskListener;
-
 import java.io.File;
 import java.io.IOException;
+import java.io.Serial;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
-
 import jenkins.MasterToSlaveFileCallable;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
-
-import org.junit.Assume;
-import org.junit.Rule;
-import org.junit.Test;
+import jenkins.model.Jenkins;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.LoggerRule;
+import org.jvnet.hudson.test.LogRecorder;
 import org.jvnet.hudson.test.MockFolder;
 import org.jvnet.hudson.test.WithoutJenkins;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class WorkspaceCleanupThreadTest {
+@WithJenkins
+class WorkspaceCleanupThreadTest {
 
-    @Rule public JenkinsRule r = new JenkinsRule();
+    private final LogRecorder logs = new LogRecorder().record(WorkspaceCleanupThread.class, Level.ALL);
 
-    @Rule public LoggerRule logs = new LoggerRule().record(WorkspaceCleanupThread.class, Level.ALL);
+    private JenkinsRule r;
 
-    @Test public void cleanUpSlaves() throws Exception {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
+
+    @Test
+    void cleanUpSlaves() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
 
         FilePath ws1 = createOldWorkspaceOn(r.createOnlineSlave(), p);
 
         p.setAssignedNode(r.jenkins);
-        FreeStyleBuild b = r.assertBuildStatusSuccess(p.scheduleBuild2(0));
+        FreeStyleBuild b = r.buildAndAssertSuccess(p);
         assertEquals(r.jenkins, b.getBuiltOn());
         FilePath ws2 = b.getWorkspace();
 
@@ -77,7 +85,8 @@ public class WorkspaceCleanupThreadTest {
     }
 
     @Issue("JENKINS-21023")
-    @Test public void modernMasterWorkspaceLocation() throws Exception {
+    @Test
+    void modernMasterWorkspaceLocation() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
 
         FilePath ws1 = createOldWorkspaceOn(r.jenkins, p);
@@ -93,7 +102,8 @@ public class WorkspaceCleanupThreadTest {
     }
 
     @Issue("JENKINS-21023")
-    @Test public void jobInFolder() throws Exception {
+    @Test
+    void jobInFolder() throws Exception {
         MockFolder d = r.createFolder("d");
         FreeStyleProject p1 = d.createProject(FreeStyleProject.class, "p");
         FilePath ws1 = createOldWorkspaceOn(r.jenkins, p1);
@@ -117,7 +127,8 @@ public class WorkspaceCleanupThreadTest {
         assertTrue(ws4.exists());
     }
 
-    @Test public void doNothingIfDisabled() throws Exception {
+    @Test
+    void doNothingIfDisabled() throws Exception {
         WorkspaceCleanupThread.disabled = true;
         FreeStyleProject p = r.createFreeStyleProject();
 
@@ -134,7 +145,8 @@ public class WorkspaceCleanupThreadTest {
         assertFalse(ws.exists());
     }
 
-    @Test public void removeOnlyWhatIsOldEnough() throws Exception {
+    @Test
+    void removeOnlyWhatIsOldEnough() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         FilePath ws = createOldWorkspaceOn(r.jenkins, p);
         createOldWorkspaceOn(r.createOnlineSlave(), p);
@@ -153,14 +165,17 @@ public class WorkspaceCleanupThreadTest {
         assertFalse(ws.exists());
     }
 
-    @Test @WithoutJenkins public void recurrencePeriodIsInHours() {
+    @Test
+    @WithoutJenkins
+    void recurrencePeriodIsInHours() {
         assertEquals(
                 TimeUnit.HOURS.toMillis(WorkspaceCleanupThread.recurrencePeriodHours),
                 new WorkspaceCleanupThread().getRecurrencePeriod()
         );
     }
 
-    @Test public void vetoByScm() throws Exception {
+    @Test
+    void vetoByScm() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         FilePath ws = createOldWorkspaceOn(r.jenkins, p);
         createOldWorkspaceOn(r.createOnlineSlave(), p);
@@ -178,25 +193,48 @@ public class WorkspaceCleanupThreadTest {
 
     @Issue("JENKINS-27152")
     @Test
-    public void deleteTemporaryDirectory() throws Exception {
+    void deleteTemporaryDirectory() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         FilePath ws = createOldWorkspaceOn(r.jenkins, p);
         FilePath tmp = WorkspaceList.tempDir(ws);
         tmp.child("stuff").write("content", null);
+        tmp.act(new Touch(0));
         createOldWorkspaceOn(r.createOnlineSlave(), p);
         performCleanup();
         assertFalse(ws.exists());
-        assertFalse("temporary directory should be cleaned up as well", tmp.exists());
+        assertFalse(tmp.exists(), "temporary directory should be cleaned up as well");
+    }
+
+    @Issue("JENKINS-65829")
+    @Test
+    void deleteSoleLibsDirectory() throws Exception {
+        FreeStyleProject p = r.createFreeStyleProject();
+        FilePath jobWs = Jenkins.get().getWorkspaceFor(p);
+        FilePath libsWs = jobWs.withSuffix(WorkspaceList.COMBINATOR + "libs");
+        libsWs.child("test-libs").write("content", null);
+        libsWs.act(new Touch(0));
+        assertFalse(jobWs.exists());
+        assertTrue(libsWs.exists());
+        performCleanup();
+        assertFalse(jobWs.exists());
+        assertFalse(libsWs.exists(), "libs directory should be cleaned up as well");
     }
 
     private FilePath createOldWorkspaceOn(Node slave, FreeStyleProject p) throws Exception {
         p.setAssignedNode(slave);
-        FreeStyleBuild b1 = r.assertBuildStatusSuccess(p.scheduleBuild2(0));
+        FreeStyleBuild b1 = r.buildAndAssertSuccess(p);
         assertEquals(slave, b1.getBuiltOn());
         FilePath ws = b1.getWorkspace();
         assertNotNull(ws);
         ws.act(new Touch(0));
         return ws;
+    }
+
+    private FilePath createOldLibsWorkspace(FreeStyleProject p) throws IOException, InterruptedException {
+        FilePath libsWs = Jenkins.get().getWorkspaceFor(p).withSuffix(WorkspaceList.COMBINATOR + "libs");
+        libsWs.child("test-libs").write("content", null);
+        libsWs.act(new Touch(0));
+        return libsWs;
     }
 
     private void performCleanup() throws InterruptedException, IOException {
@@ -205,28 +243,30 @@ public class WorkspaceCleanupThreadTest {
 
     private static final class VetoSCM extends NullSCM {
         private final boolean answer;
-        public VetoSCM(boolean answer) {
+
+        VetoSCM(boolean answer) {
             this.answer = answer;
         }
 
         @Override
         public boolean processWorkspaceBeforeDeletion(
                 Job<?, ?> project, FilePath workspace, Node node
-        ) throws IOException, InterruptedException {
+        ) {
             return answer;
         }
     }
 
     private static final class Touch extends MasterToSlaveFileCallable<Void> {
+        @Serial
         private static final long serialVersionUID = 1L;
         private final long time;
 
-        public Touch(long time) {
+        Touch(long time) {
             this.time = time;
         }
 
-        @Override public Void invoke(File f, VirtualChannel channel) throws IOException, InterruptedException {
-            Assume.assumeTrue("failed to reset lastModified on " + f, f.setLastModified(time));
+        @Override public Void invoke(File f, VirtualChannel channel) {
+            assumeTrue(f.setLastModified(time), "failed to reset lastModified on " + f);
             return null;
         }
     }

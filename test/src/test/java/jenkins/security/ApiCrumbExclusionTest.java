@@ -21,49 +21,53 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security;
 
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.Page;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlFormUtil;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import hudson.model.UnprotectedRootAction;
 import hudson.model.User;
 import hudson.security.csrf.DefaultCrumbIssuer;
 import hudson.util.HttpResponses;
-import jenkins.security.apitoken.ApiTokenTestHelper;
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.IOException;
+import java.net.URL;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.Page;
+import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlFormUtil;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsRule.WebClient;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.HttpResponse;
 import org.xml.sax.SAXException;
 
-import java.io.IOException;
-import java.net.URL;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-
-public class ApiCrumbExclusionTest {
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+@WithJenkins
+class ApiCrumbExclusionTest {
 
     private WebClient wc;
 
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
     @Test
     @Issue("JENKINS-22474")
-    public void callUsingApiTokenDoesNotRequireCSRFToken() throws Exception {
-        ApiTokenTestHelper.enableLegacyBehavior();
-
+    void callUsingApiTokenDoesNotRequireCSRFToken() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setCrumbIssuer(null);
-        User foo = User.get("foo");
+        User foo = User.getOrCreateByIdOrFullName("foo");
 
         wc = j.createWebClient();
 
@@ -81,7 +85,7 @@ public class ApiCrumbExclusionTest {
         checkWeCanChangeMyDescription(200);
 
         wc = j.createWebClient();
-        j.jenkins.setCrumbIssuer(new DefaultCrumbIssuer(false));
+        j.jenkins.setCrumbIssuer(new DefaultCrumbIssuer());
 
         // even with crumbIssuer enabled, we are not required to send a CSRF token when using API token
         wc.withBasicApiToken(foo);
@@ -97,7 +101,7 @@ public class ApiCrumbExclusionTest {
         checkWeCanChangeMyDescription(200);
     }
 
-    private void makeRequestAndVerify(String expected) throws IOException, SAXException {
+    private void makeRequestAndVerify(String expected) throws IOException {
         WebRequest req = new WebRequest(new URL(j.getURL(), "test-post"));
         req.setHttpMethod(HttpMethod.POST);
         req.setEncodingType(null);
@@ -105,17 +109,13 @@ public class ApiCrumbExclusionTest {
         assertEquals(expected, p.getWebResponse().getContentAsString());
     }
 
-    private void makeRequestAndFail(int expectedCode) throws IOException, SAXException {
-        try {
-            makeRequestAndVerify("-");
-            fail();
-        } catch (FailingHttpStatusCodeException e) {
-            assertEquals(expectedCode, e.getStatusCode());
-        }
+    private void makeRequestAndFail(int expectedCode) {
+        final FailingHttpStatusCodeException exception = assertThrows(FailingHttpStatusCodeException.class, () -> makeRequestAndVerify("-"));
+        assertEquals(expectedCode, exception.getStatusCode());
     }
 
     private void checkWeCanChangeMyDescription(int expectedCode) throws IOException, SAXException {
-        HtmlPage page = wc.goTo("me/configure");
+        HtmlPage page = wc.goTo("me/account/");
         HtmlForm form = page.getFormByName("config");
         form.getTextAreaByName("_.description").setText("random description: " + Math.random());
 

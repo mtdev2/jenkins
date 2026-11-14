@@ -1,37 +1,44 @@
 package hudson.model;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.emptyIterable;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.MatcherAssert.assertThat;
-
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import hudson.security.ACL;
-import hudson.security.AuthorizationStrategy;
-import hudson.security.SecurityRealm;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.LoggerRule;
-import org.jvnet.hudson.test.TestExtension;
 
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.security.ACL;
+import hudson.security.AuthorizationStrategy;
+import hudson.security.SecurityRealm;
 import java.util.Collection;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.LogRecorder;
+import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class DescriptorVisibilityFilterTest {
+@WithJenkins
+class DescriptorVisibilityFilterTest {
 
-    @Rule public JenkinsRule j = new JenkinsRule();
+    private final LogRecorder logger = new LogRecorder();
 
-    @Rule public LoggerRule logger = new LoggerRule();
+    private JenkinsRule j;
 
-    @Test @Issue("JENKINS-40545")
-    public void jenkins40545() throws Exception {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
+    @Test
+    @Issue("JENKINS-40545")
+    void jenkins40545() throws Exception {
         logger.record("hudson.ExpressionFactory2$JexlExpression", Level.WARNING);
         logger.record("hudson.model.DescriptorVisibilityFilter", Level.WARNING);
         logger.capture(10);
@@ -49,8 +56,9 @@ public class DescriptorVisibilityFilterTest {
         assertThat(page.getWebResponse().getContentAsString(), containsString("descriptors found: .")); // No output written from expression
     }
 
-    @Test @Issue("JENKINS-49044")
-    public void securityRealmAndAuthStrategyHidden() throws Exception {
+    @Test
+    @Issue("JENKINS-49044")
+    void securityRealmAndAuthStrategyHidden() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(AuthorizationStrategy.UNSECURED);
         HtmlPage page = j.createWebClient().goTo("configureSecurity");
@@ -77,7 +85,7 @@ public class DescriptorVisibilityFilterTest {
         public static final class HideDescriptor extends DescriptorVisibilityFilter {
             @Override
             public boolean filter(@CheckForNull Object context, @NonNull Descriptor descriptor) {
-                return !(descriptor instanceof DescriptorImpl);
+                return !(descriptor instanceof TestSecurityRealm.DescriptorImpl);
             }
         }
     }
@@ -105,7 +113,7 @@ public class DescriptorVisibilityFilterTest {
         public static final class HideDescriptor extends DescriptorVisibilityFilter {
             @Override
             public boolean filter(@CheckForNull Object context, @NonNull Descriptor descriptor) {
-                return !(descriptor instanceof DescriptorImpl);
+                return !(descriptor instanceof TestAuthStrategy.DescriptorImpl);
             }
         }
     }

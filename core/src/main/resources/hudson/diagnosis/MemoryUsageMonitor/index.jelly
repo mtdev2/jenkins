@@ -29,10 +29,9 @@ THE SOFTWARE.
     <!-- TODO: st:include page="sidepanel.jelly" /-->
     <l:main-panel>
       <h1>
-        <l:icon class="icon-monitor icon-xlg"/>
         ${%JVM Memory Usage}
       </h1>
-      <j:set var="type" value="${request.getParameter('type') ?: 'min'}" />
+      <j:set var="type" value="${request2.getParameter('type') ?: 'min'}" />
       <div>
         ${%Timespan}:
         <j:choose>
@@ -62,7 +61,7 @@ THE SOFTWARE.
           </j:otherwise>
         </j:choose>
       </div>
-      <img src="graph?type=${type}&amp;width=500&amp;height=300" />
+      <img src="graph?type=${type}&amp;width=500&amp;height=300" class="jenkins-graph-card" />
     </l:main-panel>
   </l:layout>
 </j:jelly>

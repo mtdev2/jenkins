@@ -21,7 +21,10 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 /**
  * Enum that represents {@link Boolean} state (including null for the absence.)
@@ -36,19 +39,18 @@ public enum YesNoMaybe {
     NO,
     MAYBE;
 
+    @SuppressFBWarnings(value = "NP_BOOLEAN_RETURN_NULL", justification = "bridge method for backward compatibility")
     public static Boolean toBoolean(YesNoMaybe v) {
-        if (v==null)    return null;
+        if (v == null)    return null;
         return v.toBool();
     }
-    
+
+    @SuppressFBWarnings(value = "NP_BOOLEAN_RETURN_NULL", justification = "bridge method for backward compatibility")
     public Boolean toBool() {
-        switch (this) {
-        case YES:
-            return true;
-        case NO:
-            return false;
-        default:
-            return null;
-        }
+        return switch (this) {
+            case YES -> true;
+            case NO -> false;
+            default -> null;
+        };
     }
 }

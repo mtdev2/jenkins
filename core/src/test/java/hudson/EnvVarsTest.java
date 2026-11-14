@@ -21,17 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson;
-
-import hudson.EnvVars.OverrideOrderCalculator;
-
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.TreeMap;
-
-import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
@@ -39,21 +30,28 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import hudson.EnvVars.OverrideOrderCalculator;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import org.junit.jupiter.api.Test;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class EnvVarsTest {
+class EnvVarsTest {
 
     @Test
-    public void caseInsensitive() {
-        EnvVars ev = new EnvVars(Collections.singletonMap("Path","A:B:C"));
+    void caseInsensitive() {
+        EnvVars ev = new EnvVars(Map.of("Path", "A:B:C"));
         assertTrue(ev.containsKey("PATH"));
-        assertEquals("A:B:C",ev.get("PATH"));
+        assertEquals("A:B:C", ev.get("PATH"));
     }
 
     @Test
-    public void overrideExpandingAll() {
+    void overrideExpandingAll() {
         EnvVars env = new EnvVars();
         env.put("PATH", "orig");
         env.put("A", "Value1");
@@ -73,7 +71,7 @@ public class EnvVarsTest {
     }
 
     @Test
-    public void overrideOrderCalculatorSimple() {
+    void overrideOrderCalculatorSimple() {
         EnvVars env = new EnvVars();
         EnvVars overrides = new EnvVars();
         overrides.put("A", "NoReference");
@@ -89,7 +87,7 @@ public class EnvVarsTest {
     }
 
     @Test
-    public void overrideOrderCalculatorInOrder() {
+    void overrideOrderCalculatorInOrder() {
         EnvVars env = new EnvVars();
         EnvVars overrides = new EnvVars();
         overrides.put("A", "NoReference");
@@ -104,7 +102,7 @@ public class EnvVarsTest {
     }
 
     @Test
-    public void overrideOrderCalculatorMultiple() {
+    void overrideOrderCalculatorMultiple() {
         EnvVars env = new EnvVars();
         EnvVars overrides = new EnvVars();
         overrides.put("A", "Noreference");
@@ -117,18 +115,18 @@ public class EnvVarsTest {
     }
 
     @Test
-    public void overrideOrderCalculatorSelfReference() {
+    void overrideOrderCalculatorSelfReference() {
         EnvVars env = new EnvVars();
         EnvVars overrides = new EnvVars();
         overrides.put("PATH", "some;${PATH}");
 
         OverrideOrderCalculator calc = new OverrideOrderCalculator(env, overrides);
         List<String> order = calc.getOrderedVariableNames();
-        assertEquals(Collections.singletonList("PATH"), order);
+        assertEquals(List.of("PATH"), order);
     }
 
     @Test
-    public void overrideOrderCalculatorCyclic() {
+    void overrideOrderCalculatorCyclic() {
         EnvVars env = new EnvVars();
         env.put("C", "Existing");
         EnvVars overrides = new EnvVars();
@@ -146,7 +144,7 @@ public class EnvVarsTest {
     }
 
     @Test
-    public void putIfNotNull() {
+    void putIfNotNull() {
         EnvVars env = new EnvVars();
         env.putIfNotNull("foo", null);
         assertTrue(env.isEmpty());
@@ -155,7 +153,7 @@ public class EnvVarsTest {
     }
 
     @Test
-    public void putAllNonNull() {
+    void putAllNonNull() {
         EnvVars env = new EnvVars();
         TreeMap<String, String> map = new TreeMap<>();
         map.put("A", "a");

@@ -21,21 +21,24 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
-import org.junit.Test;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 
-public class RingBufferLogHandlerTest {
+class RingBufferLogHandlerTest {
 
     @Test
     @Issue("JENKINS-9120")
-    public void tooMuchRecordsShouldNotCrashHandler() {
+    void tooMuchRecordsShouldNotCrashHandler() {
         final RingBufferLogHandler handler = new RingBufferLogHandler();
-
-        for (long i = 0; i < (long)Integer.MAX_VALUE + 300; i++) {
+        LogRecord lr = new LogRecord(Level.INFO, "xxx");
+        for (long i = 0; i < (long) Integer.MAX_VALUE + 300; i++) {
             // throws ArrayIndexOutOfBoundsException after int-overflow
-            handler.publish(null);
+            handler.publish(lr);
         }
     }
 }

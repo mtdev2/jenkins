@@ -24,31 +24,38 @@
 
 package hudson.cli;
 
-import static hudson.cli.CLICommandInvoker.Matcher.*;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.CoreMatchers.*;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.text.StringContainsInOrder.stringContainsInOrder;
-
-import java.io.PrintStream;
-import java.util.Arrays;
 
 import hudson.cli.CLICommandInvoker.Result;
 import hudson.model.AbstractProject;
-
+import java.io.PrintStream;
+import java.util.Arrays;
 import org.hamcrest.Matcher;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsRule.WebClient;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.Option;
 
-public class HelpCommandTest {
+@WithJenkins
+class HelpCommandTest {
 
-    @Rule public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Test public void getHelpRunningCommand() {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
+    @Test
+    void getHelpRunningCommand() {
 
         CLICommandInvoker command = new CLICommandInvoker(j, new HelpCommand());
 
@@ -71,16 +78,17 @@ public class HelpCommandTest {
         assertContainsUsageOfMethodCommand(result.stderr());
     }
 
-    @Test public void getHelpUsingJenkinsUI() throws Exception {
+    @Test
+    void getHelpUsingJenkinsUI() throws Exception {
 
         WebClient wc = j.createWebClient();
-        String generalHelp = wc.goTo("cli").asText();
+        String generalHelp = wc.goTo("cli").asNormalizedText();
 
         assertContainsOverviewOfClassCommand(generalHelp);
         assertContainsOverviewOfMethodCommand(generalHelp);
 
-        assertContainsUsageOfClassCommand(wc.goTo("cli/command/class-command").asText());
-        assertContainsUsageOfMethodCommand(wc.goTo("cli/command/offline-node").asText());
+        assertContainsUsageOfClassCommand(wc.goTo("cli/command/class-command").asNormalizedText());
+        assertContainsUsageOfMethodCommand(wc.goTo("cli/command/offline-node").asNormalizedText());
     }
 
     private void assertContainsOverviewOfClassCommand(String text) {
@@ -101,8 +109,8 @@ public class HelpCommandTest {
 
     private void assertContainsUsageOfMethodCommand(String text) {
         assertThat(text, containsString("offline-node NAME ... [-m VAL]"));
-        assertThat(text, containsStrings("NAME", "Agent name, or empty string for master"));
-        assertThat(text, containsStrings("-m VAL", "Record the reason about why you are disconnecting this node"));
+        assertThat(text, containsStrings("NAME", "Agent name, or empty string for built-in node"));
+        assertThat(text, containsStrings("-m VAL", "Record the reason about why you are taking this node offline"));
     }
 
     private static Matcher<String> containsStrings(String... strings) {
@@ -116,10 +124,10 @@ public class HelpCommandTest {
         private static final String LONG_DESCRIPTION = "Long description of class-command";
         private static final String NAME = "class-command";
 
-        @Argument(usage="Job arg")
+        @Argument(usage = "Job arg")
         public AbstractProject<?, ?> job;
 
-        @Option(name="-b", metaVar="BUILD", usage="Build opt")
+        @Option(name = "-b", metaVar = "BUILD", usage = "Build opt")
         public String build;
 
         @Override
@@ -138,7 +146,7 @@ public class HelpCommandTest {
         }
 
         @Override
-        protected int run() throws Exception {
+        protected int run() {
             throw new UnsupportedOperationException();
         }
     }

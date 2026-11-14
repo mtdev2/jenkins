@@ -35,11 +35,12 @@ THE SOFTWARE.
         title="${%Trigger builds remotely} (${%e.g., from scripts})"
         checked="${it.authToken!=null}">
       <f:entry title="${%Authentication Token}">
-        <f:textbox name="authToken" value="${it.authToken.token}" />
+        <f:password name="authToken" value="${it.authToken.encryptedToken}" />
+        <div class="clearfix"/><!-- f:password in readOnlyMode only has a span, not a div, so the following text would be on the same line as "****" -->
         ${%Use the following URL to trigger build remotely:}
-        <tt>JENKINS_URL</tt>/${it.url}build?token=<tt>TOKEN_NAME</tt>
+        <code>JENKINS_URL</code>/${it.url}build?token=<code>TOKEN_NAME</code>
         ${%or}
-        /buildWithParameters?token=<tt>TOKEN_NAME</tt>
+        /buildWithParameters?token=<code>TOKEN_NAME</code>
         <br/>
         ${%Optionally append &lt;tt>&amp;cause=Cause+Text&lt;/tt> to provide text that will be included in the recorded build cause.}
       </f:entry>

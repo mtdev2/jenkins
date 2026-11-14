@@ -21,44 +21,63 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import com.gargoylesoftware.htmlunit.html.DomNodeUtil;
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlLabel;
-import hudson.model.Descriptor.FormException;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+
 import net.sf.json.JSONObject;
-import org.jvnet.hudson.test.HudsonTestCase;
+import org.htmlunit.html.DomNodeUtil;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlLabel;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class ViewPropertyTest extends HudsonTestCase {
-    public void testRoundtrip() throws Exception {
+@WithJenkins
+class ViewPropertyTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
+    @Test
+    void testRoundtrip() throws Exception {
         ListView foo = new ListView("foo");
-        jenkins.addView(foo);
+        j.jenkins.addView(foo);
 
         // make sure it renders as optionalBlock
-        HtmlForm f = createWebClient().getPage(foo, "configure").getFormByName("viewConfig");
+        HtmlForm f = j.createWebClient().getPage(foo, "configure").getFormByName("viewConfig");
         ((HtmlLabel) DomNodeUtil.selectSingleNode(f, ".//LABEL[text()='ViewPropertyImpl']")).click();
-        submit(f);
+        j.submit(f);
         ViewPropertyImpl vp = foo.getProperties().get(ViewPropertyImpl.class);
-        assertEquals("Duke",vp.name);
+        assertEquals("Duke", vp.name);
 
         // make sure it roundtrips correctly
         vp.name = "Kohsuke";
-        configRoundtrip(foo);
+        j.configRoundtrip(foo);
         ViewPropertyImpl vp2 = foo.getProperties().get(ViewPropertyImpl.class);
-        assertNotSame(vp,vp2);
-        assertEqualDataBoundBeans(vp,vp2);
+        assertNotSame(vp, vp2);
+        j.assertEqualDataBoundBeans(vp, vp2);
     }
 
     public static class ViewPropertyImpl extends ViewProperty {
         public String name;
 
+        @SuppressWarnings("checkstyle:redundantmodifier")
         @DataBoundConstructor
         public ViewPropertyImpl(String name) {
             this.name = name;
@@ -68,19 +87,20 @@ public class ViewPropertyTest extends HudsonTestCase {
         public static class DescriptorImpl extends ViewPropertyDescriptor {}
     }
 
-    public void testInvisibleProperty() throws Exception {
+    @Test
+    void testInvisibleProperty() throws Exception {
         ListView foo = new ListView("foo");
-        jenkins.addView(foo);
+        j.jenkins.addView(foo);
 
         // test the rendering (or the lack thereof) of an invisible property
-        configRoundtrip(foo);
+        j.configRoundtrip(foo);
         assertNull(foo.getProperties().get(InvisiblePropertyImpl.class));
 
         // do the same but now with a configured instance
         InvisiblePropertyImpl vp = new InvisiblePropertyImpl();
         foo.getProperties().add(vp);
-        configRoundtrip(foo);
-        assertSame(vp,foo.getProperties().get(InvisiblePropertyImpl.class));
+        j.configRoundtrip(foo);
+        assertSame(vp, foo.getProperties().get(InvisiblePropertyImpl.class));
     }
 
     public static class InvisiblePropertyImpl extends ViewProperty {
@@ -88,7 +108,7 @@ public class ViewPropertyTest extends HudsonTestCase {
         }
 
         @Override
-        public ViewProperty reconfigure(StaplerRequest req, JSONObject form) throws FormException {
+        public ViewProperty reconfigure(StaplerRequest2 req, JSONObject form) {
             return this;
         }
 

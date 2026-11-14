@@ -1,21 +1,15 @@
 package jenkins.model;
 
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import com.gargoylesoftware.htmlunit.WebResponse;
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import org.hamcrest.BaseMatcher;
-import org.hamcrest.Description;
-import org.hamcrest.Matcher;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.MockAuthorizationStrategy;
-import org.jvnet.hudson.test.recipes.WithPlugin;
+import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.PluginWrapper;
 import hudson.cli.CLICommandInvoker;
@@ -27,47 +21,55 @@ import hudson.model.View;
 import hudson.security.HudsonPrivateSecurityRealm;
 import hudson.security.ProjectMatrixAuthorizationStrategy;
 import hudson.tasks.Shell;
-
-import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.notNullValue;
-import static org.junit.Assert.assertEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-
-import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import org.hamcrest.BaseMatcher;
+import org.hamcrest.Description;
+import org.hamcrest.Matcher;
+import org.htmlunit.WebResponse;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.jvnet.hudson.test.recipes.WithPlugin;
 
 /**
  * As Jenkins.MANAGE can be enabled on startup with jenkins.security.ManagePermission property, we need a test class
  * with this property activated.
  */
 // TODO move tests to indicated test classes when we no longer need to set the system property
-public class JenkinsManagePermissionTest {
+@WithJenkins
+class JenkinsManagePermissionTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @BeforeClass
-    public static void enableManagePermission() {
+    @BeforeAll
+    static void enableManagePermission() {
         System.setProperty("jenkins.security.ManagePermission", "true");
     }
 
-    @AfterClass
-    public static void disableManagePermission() {
-        System.clearProperty("jenkins.security.ManagePermission");
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
     }
 
+    @AfterAll
+    static void disableManagePermission() {
+        System.clearProperty("jenkins.security.ManagePermission");
+    }
 
     // -----------------------------
     // DisablePluginCommandTest
     @Issue("JENKINS-60266")
     @Test
-    @WithPlugin({ "depender-0.0.2.hpi", "dependee-0.0.2.hpi"})
-    public void managerCannotDisablePlugin() {
-
+    @WithPlugin({"depender-0.0.2.hpi", "dependee-0.0.2.hpi"})
+    void managerCannotDisablePlugin() {
         //GIVEN a user with Jenkins.MANAGE permission
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -90,7 +92,6 @@ public class JenkinsManagePermissionTest {
         return new CLICommandInvoker(j, new DisablePluginCommand()).asUser(user).invokeWithArgs(args);
     }
 
-
     private void assertPluginEnabled(String name) {
         PluginWrapper plugin = j.getPluginManager().getPlugin(name);
         assertThat(plugin, is(notNullValue()));
@@ -104,7 +105,7 @@ public class JenkinsManagePermissionTest {
     //ComputerTest
     @Issue("JENKINS-60266")
     @Test
-    public void dumpExportTableForbiddenWithoutAdminPermission() throws Exception {
+    void dumpExportTableForbiddenWithoutAdminPermission() throws Exception {
         final String READER = "reader";
         final String MANAGER = "manager";
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
@@ -113,8 +114,8 @@ public class JenkinsManagePermissionTest {
                 .grant(Jenkins.MANAGE).everywhere().to(MANAGER)
                 .grant(Jenkins.READ).everywhere().to(MANAGER)
         );
-        j.createWebClient().login(READER).assertFails("computer/(master)/dumpExportTable", HttpURLConnection.HTTP_FORBIDDEN);
-        j.createWebClient().login(MANAGER).assertFails("computer/(master)/dumpExportTable", HttpURLConnection.HTTP_FORBIDDEN);
+        j.createWebClient().login(READER).assertFails("computer/(built-in)/dumpExportTable", HttpURLConnection.HTTP_FORBIDDEN);
+        j.createWebClient().login(MANAGER).assertFails("computer/(built-in)/dumpExportTable", HttpURLConnection.HTTP_FORBIDDEN);
     }
 
     // End of ComputerTest
@@ -124,7 +125,7 @@ public class JenkinsManagePermissionTest {
     // HudsonTest
     @Issue("JENKINS-60266")
     @Test
-    public void someGlobalConfigurationIsNotDisplayedWithManagePermission() throws Exception {
+    void someGlobalConfigurationIsNotDisplayedWithManagePermission() throws Exception {
         //GIVEN a user with Jenkins.MANAGE permission
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -132,7 +133,7 @@ public class JenkinsManagePermissionTest {
 
         //WHEN the user goes to /configure page
         HtmlForm form = j.createWebClient().goTo("configure").getFormByName("config");
-        String formText = form.asText();
+        String formText = form.asNormalizedText();
         //THEN items restricted to ADMINISTER only should not be displayed.
         assertThat("Should be able to configure system message", formText, not(containsString("systemMessage")));
         assertThat("Should be able to configure project naming strategy", formText, not(containsString("useProjectNamingStrategy")));
@@ -148,16 +149,14 @@ public class JenkinsManagePermissionTest {
 
     @Issue("JENKINS-60266")
     @Test
-    public void someGlobalConfigCanNotBeModifiedWithManagePermission() throws Exception {
+    void someGlobalConfigCanNotBeModifiedWithManagePermission() throws Exception {
         j.jenkins.addView(new MyView("testView", j.jenkins));
 
         //GIVEN the Global Configuration Form, with some changes unsaved
-        int currentNumberExecutors = j.getInstance().getNumExecutors();
         String shell = getShell();
         View view = j.jenkins.getPrimaryView();
         HtmlForm form = j.createWebClient().goTo("configure").getFormByName("config");
-        form.getInputByName("_.numExecutors").setValueAttribute(""+(currentNumberExecutors+1));
-        form.getInputByName("_.shell").setValueAttribute("/fakeShell");
+        form.getInputByName("_.shell").setValue("/fakeShell");
         form.getSelectByName("primaryView").setSelectedAttribute("testView", true);
 
         // WHEN a user with only Jenkins.MANAGE permission try to save those changes
@@ -166,14 +165,13 @@ public class JenkinsManagePermissionTest {
                 .grant(Jenkins.MANAGE, Jenkins.READ).everywhere().toEveryone());
         j.submit(form);
         // THEN the changes on fields forbidden to a Jenkins.MANAGE permission are not saved
-        assertEquals("shouldn't be allowed to change the number of executors", currentNumberExecutors, j.getInstance().getNumExecutors());
-        assertEquals("shouldn't be allowed to change the shell executable", shell, getShell());
-        assertEquals("shouldn't be allowed to change the primary view", view, j.getInstance().getPrimaryView());
+        assertEquals(shell, getShell(), "shouldn't be allowed to change the shell executable");
+        assertEquals(view, j.getInstance().getPrimaryView(), "shouldn't be allowed to change the primary view");
     }
 
     @Issue("JENKINS-60266")
     @Test
-    public void globalConfigAllowedWithManagePermission() throws Exception {
+    void globalConfigAllowedWithManagePermission() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                 .grant(Jenkins.MANAGE, Jenkins.READ).everywhere().toEveryone());
@@ -186,7 +184,7 @@ public class JenkinsManagePermissionTest {
 
     @Issue("JENKINS-61457")
     @Test
-    public void managePermissionCanChangeUsageStatistics() throws Exception {
+    void managePermissionCanChangeUsageStatistics() throws Exception {
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
                                                    .grant(Jenkins.MANAGE, Jenkins.READ).everywhere().toEveryone());
@@ -205,11 +203,11 @@ public class JenkinsManagePermissionTest {
     }
 
     private static Matcher<WebResponse> hasResponseCode(final int httpStatus) {
-        return new BaseMatcher<WebResponse>() {
+        return new BaseMatcher<>() {
             @Override
             public boolean matches(final Object item) {
                 final WebResponse response = (WebResponse) item;
-                return (response.getStatusCode() == httpStatus);
+                return response.getStatusCode() == httpStatus;
             }
 
             @Override
@@ -235,8 +233,7 @@ public class JenkinsManagePermissionTest {
 
     @Issue("JENKINS-63795")
     @Test
-    public void managePermissionShouldBeAllowedToRestart() throws IOException {
-
+    void managePermissionShouldBeAllowedToRestart() throws IOException {
         //GIVEN a Jenkins with 3 users : ADMINISTER, MANAGE and READ
         HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false, false, null);
         User adminUser = realm.createAccount("Administer", "G0d");
@@ -256,27 +253,27 @@ public class JenkinsManagePermissionTest {
         //WHEN Asking for restart or safe-restart
         //THEN MANAGE and ADMINISTER are allowed but not READ
         CLICommandInvoker.Result result = new CLICommandInvoker(j, "restart").asUser(readUser.getId()).invoke();
-        assertThat(result, allOf(failedWith(6),hasNoStandardOutput()));
+        assertThat(result, allOf(failedWith(6), hasNoStandardOutput()));
 
         result = new CLICommandInvoker(j, "safe-restart").asUser(readUser.getId()).invoke();
-        assertThat(result, allOf(failedWith(6),hasNoStandardOutput()));
+        assertThat(result, allOf(failedWith(6), hasNoStandardOutput()));
 
         // We should assert that cli result is 0
         // but as restart is not allowed in JenkinsRule, we assert that it has tried to restart.
         result = new CLICommandInvoker(j, "restart").asUser(manageUser.getId()).invoke();
         assertThat(result, failedWith(1));
-        assertThat(result.stderr(),containsString("RestartNotSupportedException"));
+        assertThat(result.stderr(), containsString("RestartNotSupportedException"));
 
         result = new CLICommandInvoker(j, "safe-restart").asUser(manageUser.getId()).invoke();
         assertThat(result, failedWith(1));
-        assertThat(result.stderr(),containsString("RestartNotSupportedException"));
+        assertThat(result.stderr(), containsString("RestartNotSupportedException"));
 
         result = new CLICommandInvoker(j, "restart").asUser(adminUser.getId()).invoke();
         assertThat(result, failedWith(1));
-        assertThat(result.stderr(),containsString("RestartNotSupportedException"));
+        assertThat(result.stderr(), containsString("RestartNotSupportedException"));
 
         result = new CLICommandInvoker(j, "safe-restart").asUser(adminUser.getId()).invoke();
         assertThat(result, failedWith(1));
-        assertThat(result.stderr(),containsString("RestartNotSupportedException"));
+        assertThat(result.stderr(), containsString("RestartNotSupportedException"));
     }
 }

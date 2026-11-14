@@ -1,12 +1,12 @@
 package jenkins.util;
 
-import java.util.concurrent.CompletableFuture;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.remoting.AtmostOneThreadExecutor;
 import hudson.security.ACL;
 import hudson.util.DaemonThreadFactory;
 import hudson.util.NamingThreadFactory;
-
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -81,7 +81,7 @@ public class AtmostOneTaskExecutor<V> {
     }
 
     public synchronized Future<V> submit() {
-        if (pending==null) {
+        if (pending == null) {
             pending = new CompletableFuture<>();
             maybeRun();
         }
@@ -93,31 +93,29 @@ public class AtmostOneTaskExecutor<V> {
      * but {@link #inprogress} is null (meaning none is executing right now),
      * get one going.
      */
+    @SuppressFBWarnings(value = {"RV_RETURN_VALUE_IGNORED_BAD_PRACTICE", "IS2_INCONSISTENT_SYNC"}, justification = "method signature does not permit plumbing through the return value")
     private synchronized void maybeRun() {
-        if (inprogress==null && pending!=null) {
-            base.submit(new Callable<Void>() {
-                @Override
-                public Void call() throws Exception {
-                    synchronized (AtmostOneTaskExecutor.this) {
-                        // everyone who submits after this should form a next batch
-                        inprogress = pending;
-                        pending = null;
-                    }
-
-                    try {
-                        inprogress.complete(task.call());
-                    } catch (Throwable t) {
-                        LOGGER.log(Level.WARNING, null, t);
-                        inprogress.completeExceptionally(t);
-                    } finally {
-                        synchronized (AtmostOneTaskExecutor.this) {
-                            // if next one is pending, get that scheduled
-                            inprogress = null;
-                            maybeRun();
-                        }
-                    }
-                    return null;
+        if (inprogress == null && pending != null) {
+            base.submit((Callable<Void>) () -> {
+                synchronized (AtmostOneTaskExecutor.this) {
+                    // everyone who submits after this should form a next batch
+                    inprogress = pending;
+                    pending = null;
                 }
+
+                try {
+                    inprogress.complete(task.call());
+                } catch (Throwable t) {
+                    LOGGER.log(Level.WARNING, null, t);
+                    inprogress.completeExceptionally(t);
+                } finally {
+                    synchronized (AtmostOneTaskExecutor.this) {
+                        // if next one is pending, get that scheduled
+                        inprogress = null;
+                        maybeRun();
+                    }
+                }
+                return null;
             });
         }
     }

@@ -1,23 +1,22 @@
 package hudson.util;
 
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.util.CyclicGraphDetector.CycleDetectedException;
-import org.junit.Test;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import org.junit.jupiter.api.Test;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class CyclicGraphDetectorTest {
+class CyclicGraphDetectorTest {
 
     private static class Edge {
-        String src,dst;
+        String src, dst;
 
         private Edge(String src, String dst) {
             this.src = src;
@@ -27,7 +26,7 @@ public class CyclicGraphDetectorTest {
 
     private static class Graph extends ArrayList<Edge> {
         Graph e(String src, String dst) {
-            add(new Edge(src,dst));
+            add(new Edge(src, dst));
             return this;
         }
 
@@ -54,36 +53,35 @@ public class CyclicGraphDetectorTest {
          */
         void check() throws Exception {
             new CyclicGraphDetector<String>() {
+                @Override
                 protected Set<String> getEdges(String s) {
                     return edges(s);
                 }
             }.run(nodes());
         }
 
-        void mustContainCycle(String... members) throws Exception {
-            try {
-                check();
-                fail("Cycle expected");
-            } catch (CycleDetectedException e) {
-                String msg = "Expected cycle of " + Arrays.asList(members) + " but found " + e.cycle;
-                for (String s : members)
-                    assertTrue(msg, e.cycle.contains(s));
+        void mustContainCycle(String... members) {
+            final CycleDetectedException e = assertThrows(CycleDetectedException.class, this::check, "Cycle expected");
+
+            final String msg = "Expected cycle of " + Arrays.asList(members) + " but found " + e.cycle;
+            for (String s : members) {
+                assertTrue(e.cycle.contains(s), msg);
             }
         }
     }
 
     @Test
-    public void cycle1() throws Exception {
-        new Graph().e("A","B").e("B","C").e("C","A").mustContainCycle("A","B","C");
+    void cycle1() {
+        new Graph().e("A", "B").e("B", "C").e("C", "A").mustContainCycle("A", "B", "C");
     }
 
     @Test
-    public void cycle2() throws Exception {
-        new Graph().e("A","B").e("B","C").e("C","C").mustContainCycle("C");
+    void cycle2() {
+        new Graph().e("A", "B").e("B", "C").e("C", "C").mustContainCycle("C");
     }
 
     @Test
-    public void cycle3() throws Exception {
-        new Graph().e("A","B").e("B","C").e("C","D").e("B","E").e("E","D").e("E","A").mustContainCycle("A","B","E");
+    void cycle3() {
+        new Graph().e("A", "B").e("B", "C").e("C", "D").e("B", "E").e("E", "D").e("E", "A").mustContainCycle("A", "B", "E");
     }
 }

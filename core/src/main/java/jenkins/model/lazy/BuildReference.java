@@ -1,18 +1,18 @@
 package jenkins.model.lazy;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
-import jenkins.util.SystemProperties;
 import hudson.model.Run;
 import java.lang.ref.Reference;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
 import jenkins.model.lazy.LazyBuildMixIn.RunMixIn;
+import jenkins.util.SystemProperties;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -36,12 +36,56 @@ public final class BuildReference<R> {
     private static final Logger LOGGER = Logger.getLogger(BuildReference.class.getName());
 
     final String id;
+    final int number;
     private volatile Holder<R> holder;
 
-    public BuildReference(String id, R referent) {
+    public BuildReference(String id) {
         this.id = id;
-        this.holder = findHolder(referent);
+        int num;
+        try {
+            num = Integer.parseInt(id);
+        } catch (NumberFormatException ignored) {
+            num = Integer.MAX_VALUE;
+        }
+        this.number = num;
     }
+
+    public BuildReference(String id, R referent) {
+        this(id);
+        set(referent);
+    }
+
+    /**
+     * Set referent if loaded
+     */
+    /*package*/ void set(R referent) {
+        holder = findHolder(referent);
+    }
+
+    /**
+     * check if reference marked as unloadable
+     */
+    /*package*/ boolean isUnloadable() {
+        return DefaultHolderFactory.UnloadableHolder.getInstance() == holder;
+    }
+
+    /**
+     * check if reference holder set.
+     * means there was a try to load build object and we have some result of that try
+     *
+     * @return true if there was a try to
+     */
+    /*package*/ boolean isSet() {
+        return holder != null;
+    }
+
+    /**
+     * Set referent as unloadable
+     */
+    /*package*/ void setUnloadable() {
+        holder = DefaultHolderFactory.UnloadableHolder.getInstance();
+    }
+
 
     /**
      * Gets the build if still in memory.
@@ -50,7 +94,7 @@ public final class BuildReference<R> {
      */
     public @CheckForNull R get() {
         Holder<R> h = holder; // capture
-        return h!=null ? h.get() : null;
+        return h != null ? h.get() : null;
     }
 
     /**
@@ -142,7 +186,7 @@ public final class BuildReference<R> {
      * </dl>
      */
     @Restricted(NoExternalUse.class)
-    @Extension(ordinal=Double.NEGATIVE_INFINITY) public static final class DefaultHolderFactory implements HolderFactory {
+    @Extension(ordinal = Double.NEGATIVE_INFINITY) public static final class DefaultHolderFactory implements HolderFactory {
 
         public static final String MODE_PROPERTY = "jenkins.model.lazy.BuildReference.MODE";
         private static final String mode = SystemProperties.getString(MODE_PROPERTY);
@@ -155,7 +199,7 @@ public final class BuildReference<R> {
             } else if (mode.equals("strong")) {
                 return new StrongHolder<>(referent);
             } else if (mode.equals("none")) {
-                return new NoHolder<>();
+                return NoHolder.getInstance();
             } else {
                 throw new IllegalStateException("unrecognized value of " + MODE_PROPERTY + ": " + mode);
             }
@@ -175,14 +219,46 @@ public final class BuildReference<R> {
 
         private static final class StrongHolder<R> implements Holder<R> {
             private final R referent;
+
             StrongHolder(R referent) {
                 this.referent = referent;
             }
-            @Override public R get() {return referent;}
+
+            @Override public R get() {
+                return referent;
+            }
         }
 
         private static final class NoHolder<R> implements Holder<R> {
-            @Override public R get() {return null;}
+            static final NoHolder<?> INSTANCE = new NoHolder<>();
+
+            static <R> NoHolder<R> getInstance() {
+                //noinspection unchecked
+                return (NoHolder<R>) INSTANCE;
+            }
+
+            private NoHolder() {
+            }
+
+            @Override public R get() {
+                return null;
+            }
+        }
+
+        private static final class UnloadableHolder<R> implements Holder<R> {
+            static final UnloadableHolder<?> INSTANCE = new UnloadableHolder<>();
+
+            static <R> UnloadableHolder<R> getInstance() {
+                //noinspection unchecked
+                return (UnloadableHolder<R>) INSTANCE;
+            }
+
+            private UnloadableHolder() {
+            }
+
+            @Override public R get() {
+                return null;
+            }
         }
 
     }

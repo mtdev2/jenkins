@@ -24,16 +24,16 @@
 
 package hudson;
 
-import jenkins.util.SystemProperties;
-import jenkins.model.Jenkins;
-
 import edu.umd.cs.findbugs.annotations.CheckForNull;
 import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.servlet.ServletContext;
+import io.jenkins.servlet.ServletContextWrapper;
+import jakarta.servlet.ServletContext;
 import java.io.File;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
 
 /**
  * Default implementation of {@link PluginManager}.
@@ -47,7 +47,15 @@ public class LocalPluginManager extends PluginManager {
      * @param rootDir Jenkins home directory.
      */
     public LocalPluginManager(@CheckForNull ServletContext context, @NonNull File rootDir) {
-        super(context, new File(rootDir,"plugins"));
+        super(context, new File(rootDir, "plugins"));
+    }
+
+    /**
+     * @deprecated use {@link #LocalPluginManager(ServletContext, File)}
+     */
+    @Deprecated
+    public LocalPluginManager(@CheckForNull javax.servlet.ServletContext context, @NonNull File rootDir) {
+        this(context != null ? ServletContextWrapper.toJakartaServletContext(context) : null, rootDir);
     }
 
     /**
@@ -55,7 +63,7 @@ public class LocalPluginManager extends PluginManager {
      * @param jenkins Jenkins instance that will use the plugin manager.
      */
     public LocalPluginManager(@NonNull Jenkins jenkins) {
-        this(jenkins.servletContext, jenkins.getRootDir());
+        this(jenkins.getServletContext(), jenkins.getRootDir());
     }
 
     /**
@@ -63,7 +71,7 @@ public class LocalPluginManager extends PluginManager {
      * @param rootDir Jenkins home directory.
      */
     public LocalPluginManager(@NonNull File rootDir) {
-        this(null, rootDir);
+        this((ServletContext) null, rootDir);
     }
 
     @Override

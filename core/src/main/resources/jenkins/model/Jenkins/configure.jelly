@@ -26,24 +26,40 @@ THE SOFTWARE.
   Config page
 -->
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
-<l:layout permissions="${app.MANAGE_AND_SYSTEM_READ}" title="${%Configure System}">
-  <st:include page="sidepanel.jelly" />
-  <f:breadcrumb-config-outline />
-  <l:main-panel>
-    <div class="behavior-loading">${%LOADING}</div>
-    <f:form method="post" name="config" action="configSubmit">
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout" xmlns:f="/lib/form">
+  <j:new className="jenkins.management.ConfigureLink" var="it" />
+
+  <l:settings-subpage permissions="${app.MANAGE_AND_SYSTEM_READ}" includeBreadcrumb="true">
+    <j:set var="managementLink" value="${it}" />
+    <j:set var="it" value="${app}" />
+    <j:set var="readOnlyMode" value="${!h.hasPermission(app.MANAGE)}"/>
+
+    <l:userExperimentalFlag var="newManageJenkins" flagClassName="jenkins.model.experimentalflags.NewManageJenkinsUserExperimentalFlag" />
+    <j:if test="${newManageJenkins}">
+      <section class="manage-messages">
+        <j:forEach var="am" items="${app.activeAdministrativeMonitors}">
+          <st:include page="message.jelly" it="${am}" />
+        </j:forEach>
+        <st:include page="downgrade.jelly" it="${app}" />
+      </section>
+    </j:if>
+
+    <f:form method="post" name="config" action="configSubmit" class="jenkins-form">
       <j:set var="instance" value="${it}" />
       <j:set var="descriptor" value="${instance.descriptor}" />
 
-      <f:entry title="${%Home directory}" help="/help/system-config/homeDirectory.html">
-        ${it.rootDir}
-      </f:entry>
-      <f:entry title="${%System Message}" help="/help/system-config/systemMessage.html">
-        <j:set var="readOnlyMode" value="${!h.hasPermission(app.MANAGE)}" />
-        <f:textarea name="system_message" value="${it.systemMessage}" disabled="${readOnlyMode?'true':null}" readonly="${readOnlyMode?'true':null}"
-                    codemirror-mode="${app.markupFormatter.codeMirrorMode}" codemirror-config="${app.markupFormatter.codeMirrorConfig}" previewEndpoint="/markupFormatter/previewDescription"/>
-      </f:entry>
+      <f:section title="${%General}">
+        <f:entry title="${%Home directory}" description="${%homeDirectory.description}" help="/help/system-config/homeDirectory.html">
+          <div class="jenkins-quote jenkins-quote--monospace">
+            ${it.rootDir}
+            <l:copyButton tooltip="${%Copy home directory}" text="${it.rootDir}" iconOnly="true" />
+          </div>
+        </f:entry>
+        <f:entry title="${%System Message}" description="${%systemMessage.description}">
+          <f:textarea name="system_message" value="${it.systemMessage}" disabled="${readOnlyMode?'true':null}" readonly="${readOnlyMode?'true':null}"
+                      codemirror-mode="${app.markupFormatter.codeMirrorMode}" codemirror-config="${app.markupFormatter.codeMirrorConfig}" previewEndpoint="/markupFormatter/previewDescription"/>
+        </f:entry>
+      </f:section>
 
       <!-- global configuration from everyone -->
       <j:set var="editable" value="${h.getSortedDescriptorsForGlobalConfigUnclassified()}"/>
@@ -54,21 +70,15 @@ THE SOFTWARE.
           <st:include page="${descriptor.globalConfigPage}" from="${descriptor}" />
         </f:rowSet>
       </j:forEach>
-
-      <l:hasPermission permission="${app.SYSTEM_READ}">
-        <st:include page="_cloud-note.jelly"/>
-      </l:hasPermission>
-
-      <l:hasAdministerOrManage>
-        <f:bottomButtonBar>
-          <f:submit value="${%Save}" />
-          <f:apply />
-        </f:bottomButtonBar>
-      </l:hasAdministerOrManage>
+      <j:set var="readOnlyMode" value="${!h.hasPermission(app.MANAGE)}"/>
+      <j:choose>
+        <j:when test="${newManageJenkins}">
+          <f:saveBar/>
+        </j:when>
+        <j:otherwise>
+          <f:saveApplyBar/>
+        </j:otherwise>
+      </j:choose>
     </f:form>
-    <l:hasAdministerOrManage>
-      <st:adjunct includes="lib.form.confirm" />
-    </l:hasAdministerOrManage>
-  </l:main-panel>
-</l:layout>
+  </l:settings-subpage>
 </j:jelly>

@@ -21,14 +21,17 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package lib.form;
 
-import com.gargoylesoftware.htmlunit.html.DomElement;
-import com.gargoylesoftware.htmlunit.html.HtmlButton;
-import com.gargoylesoftware.htmlunit.html.HtmlElementUtil;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import com.gargoylesoftware.htmlunit.javascript.host.html.HTMLAnchorElement;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.ExtensionList;
 import hudson.model.Describable;
 import hudson.model.Descriptor;
@@ -38,84 +41,57 @@ import hudson.tools.ToolInstallation;
 import hudson.tools.ToolInstaller;
 import hudson.tools.ToolProperty;
 import hudson.util.FormValidation;
-import net.sourceforge.htmlunit.corejs.javascript.NativeArray;
-import org.jenkinsci.Symbol;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.TestExtension;
-
 import java.io.File;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.HtmlButton;
+import org.htmlunit.html.HtmlElementUtil;
+import org.htmlunit.html.HtmlPage;
+import org.htmlunit.javascript.host.html.HTMLButtonElement;
+import org.jenkinsci.Symbol;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.instanceOf;
-import static org.hamcrest.CoreMatchers.not;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+@WithJenkins
+class HeteroListTest {
 
-public class HeteroListTest {
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
     @Issue("SECURITY-2035")
-    public void xssPrevented_heteroList_usingDescriptorDisplayName() throws Exception {
+    void xssPrevented_heteroList_usingDescriptorDisplayName() throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient();
 
         RootActionImpl rootAction = ExtensionList.lookupSingleton(RootActionImpl.class);
         TestItemDescribable.DynamicDisplayNameDescriptor dynamic = ExtensionList.lookupSingleton(TestItemDescribable.DynamicDisplayNameDescriptor.class);
-        rootAction.descriptorList = Arrays.asList(dynamic);
+        rootAction.descriptorList = List.of(dynamic);
 
         dynamic.displayName = "Display<strong>Name</strong>";
 
         HtmlPage page = wc.goTo("root");
 
         page.executeJavaScript("document.querySelector('.hetero-list-add').click();");
-        Object result = page.executeJavaScript("document.querySelector('.yuimenuitem a')").getJavaScriptResult();
-        assertThat(result, instanceOf(HTMLAnchorElement.class));
-        HTMLAnchorElement menuItem = (HTMLAnchorElement) result;
+        Object result = page.executeJavaScript("document.querySelector('.jenkins-dropdown__item')").getJavaScriptResult();
+        assertThat(result, instanceOf(HTMLButtonElement.class));
+        HTMLButtonElement menuItem = (HTMLButtonElement) result;
         String menuItemContent = menuItem.getInnerHTML();
-        assertThat(menuItemContent, not(containsString("<")));
-    }
-
-    // correspond to the hardening of escapeEntryTitleAndDescription
-    @Test
-    @Issue("SECURITY-2035") 
-    public void xssPrevented_usingToolInstallation_withJustDisplayName() throws Exception {
-        JenkinsRule.WebClient wc = j.createWebClient();
-
-        HtmlPage page = wc.goTo("configureTools/");
-
-        // check the displayName
-        Object resultDN = page.executeJavaScript(
-                "var settingFields = document.querySelectorAll('.setting-name');" +
-                        "var children = Array.from(settingFields).filter(b => b.textContent.indexOf('XSS:') !== -1)[0].children;" + 
-                        "Array.from(children).filter(c => c.tagName === 'IMG')"
-        ).getJavaScriptResult();
-        assertThat(resultDN, instanceOf(NativeArray.class));
-        NativeArray resultDNNA = (NativeArray) resultDN;
-        assertEquals(0, resultDNNA.size());
-
-        // check the description
-        Object resultDesc = page.executeJavaScript(
-                "var settingFields = document.querySelectorAll('.setting-description');" +
-                        "var children = Array.from(settingFields).filter(b => b.textContent.indexOf('XSS:') !== -1)[0].children;" +
-                        "Array.from(children).filter(c => c.tagName === 'IMG')"
-        ).getJavaScriptResult();
-        assertThat(resultDesc, instanceOf(NativeArray.class));
-        NativeArray resultDescNA = (NativeArray) resultDesc;
-        assertEquals(0, resultDescNA.size());
+        assertThat(menuItemContent, not(containsString("<img")));
     }
 
     @Test
     @Issue("SECURITY-2035")
-    public void xssPrevented_usingToolInstallation_repeatableAddExisting() throws Exception {
+    void xssPrevented_usingToolInstallation_repeatableAddExisting() throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient();
 
         HtmlPage page = wc.goTo("configureTools/");
@@ -124,12 +100,12 @@ public class HeteroListTest {
         Object result = page.executeJavaScript("Array.from(document.querySelectorAll('button')).filter(b => b.textContent.indexOf('Add XSS') !== -1)[0].innerHTML").getJavaScriptResult();
         assertThat(result, instanceOf(String.class));
         String resultString = (String) result;
-        assertThat(resultString, not(containsString("<")));
+        assertThat(resultString, not(containsString("<img")));
     }
 
     // only possible after a partial fix
     @Test
-    public void xssPrevented_usingToolInstallation_repeatableAddAfterClick() throws Exception {
+    void xssPrevented_usingToolInstallation_repeatableAddAfterClick() throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient();
 
         HtmlPage page = wc.goTo("configureTools/");
@@ -145,12 +121,12 @@ public class HeteroListTest {
         Object result = page.executeJavaScript("Array.from(document.querySelectorAll('button')).filter(b => b.textContent.indexOf('Add XSS') !== -1)[0].innerHTML").getJavaScriptResult();
         assertThat(result, instanceOf(String.class));
         String resultString = (String) result;
-        assertThat(resultString, not(containsString("<")));
+        assertThat(resultString, not(containsString("<img")));
     }
 
     @Test
     @Issue("SECURITY-2035")
-    public void xssPrevented_usingToolInstallation_repeatableAddWithExistingUsingInstallationsButton() throws Exception {
+    void xssPrevented_usingToolInstallation_repeatableAddWithExistingUsingInstallationsButton() throws Exception {
         Xss.DescriptorImpl xssDescriptor = ExtensionList.lookupSingleton(Xss.DescriptorImpl.class);
         xssDescriptor.installations = new Xss[]{ new Xss("name1", "home1", null) };
 
@@ -162,12 +138,12 @@ public class HeteroListTest {
         Object result = page.executeJavaScript("Array.from(document.querySelectorAll('button')).filter(b => b.textContent.indexOf('XSS:') !== -1)[0].innerHTML").getJavaScriptResult();
         assertThat(result, instanceOf(String.class));
         String resultString = (String) result;
-        assertThat(resultString, not(containsString("<")));
+        assertThat(resultString, not(containsString("<img")));
     }
 
     @Test
     @Issue("SECURITY-2035")
-    public void xssPrevented_usingToolInstallation_repeatableAddWithExistingAfterOpening() throws Exception {
+    void xssPrevented_usingToolInstallation_repeatableAddWithExistingAfterOpening() throws Exception {
         Xss.DescriptorImpl xssDescriptor = ExtensionList.lookupSingleton(Xss.DescriptorImpl.class);
         xssDescriptor.installations = new Xss[]{ new Xss("name1", "home1", null) };
 
@@ -183,17 +159,18 @@ public class HeteroListTest {
         // While keeping away the installations... advanced button as it's covered in its own test
         Object result = page.executeJavaScript("Array.from(document.querySelectorAll('button')).filter(b => b.textContent.indexOf('XSS') !== -1 && b.textContent.indexOf('...') === -1).map(b => b.innerHTML)").getJavaScriptResult();
         assertThat(result, instanceOf(List.class));
-        List resultArray = (List) result;
-        for (int i = 0; i < resultArray.size(); i++) {
-            assertThat((String) resultArray.get(i), not(containsString("<")));
+        @SuppressWarnings("unchecked")
+        List<String> resultList = (List<String>) result;
+        for (String str : resultList) {
+            assertThat(str, not(containsString("<img")));
         }
-        
+
         // "delete" then "add" makes us coming back in scenario covered by xssUsingToolInstallationRepeatableAdd
     }
-    
+
     @Test
     @Issue("SECURITY-2035")
-    public void xssPrevented_usingToolInstallation_repeatableDelete() throws Exception {
+    void xssPrevented_usingToolInstallation_repeatableDelete() throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient();
 
         HtmlPage page = wc.goTo("configureTools/");
@@ -201,13 +178,14 @@ public class HeteroListTest {
         // we could also re-use the same method as used in xssUsingToolInstallationRepeatableAdd
         page.executeJavaScript("Array.from(document.querySelectorAll('button')).filter(b => b.textContent.indexOf('Add XSS') !== -1)[0].click()");
 
-        Object result = page.executeJavaScript("Array.from(document.querySelectorAll('button')).filter(b => b.textContent.indexOf('Delete XSS') !== -1)[0].innerHTML").getJavaScriptResult();
+        Object result = page.executeJavaScript("Array.from(document.querySelectorAll('button span')).filter(b => b.textContent === 'Delete')[0].innerHTML").getJavaScriptResult();
         assertThat(result, instanceOf(String.class));
         String resultString = (String) result;
-        assertThat(resultString, not(containsString("<")));
+        assertThat(resultString, not(containsString("<img")));
     }
 
     public static class TestItemDescribable implements Describable<TestItemDescribable> {
+        @Override
         public Descriptor<TestItemDescribable> getDescriptor() {
             return ExtensionList.lookupSingleton(DynamicDisplayNameDescriptor.class);
         }
@@ -216,6 +194,7 @@ public class HeteroListTest {
         public static class DynamicDisplayNameDescriptor extends Descriptor<TestItemDescribable> {
             public String displayName = "NotYetDefined";
 
+            @NonNull
             @Override
             public String getDisplayName() {
                 return displayName;
@@ -227,16 +206,19 @@ public class HeteroListTest {
     public static class RootActionImpl implements UnprotectedRootAction {
         public List<Descriptor<?>> descriptorList;
 
+        @Override
         @CheckForNull
         public String getIconFileName() {
             return null;
         }
 
+        @Override
         @CheckForNull
         public String getDisplayName() {
             return null;
         }
 
+        @Override
         @CheckForNull
         public String getUrlName() {
             return "root";
@@ -245,6 +227,7 @@ public class HeteroListTest {
 
     public static final class Xss extends ToolInstallation {
 
+        @SuppressWarnings("checkstyle:redundantmodifier")
         public Xss(String name, String home, List<? extends ToolProperty<?>> properties) {
             super(name, home, properties);
         }
@@ -254,8 +237,10 @@ public class HeteroListTest {
         public static class DescriptorImpl extends ToolDescriptor<Xss> {
             private Xss[] installations = new Xss[0];
 
+            @NonNull
+            @Override
             public String getDisplayName() {
-                return "XSS: <img src=x onerror=console.warn('" + getClass().getName() +"') />";
+                return "XSS: <img src=x onerror=console.warn('" + getClass().getName() + "') />";
             }
 
             @Override

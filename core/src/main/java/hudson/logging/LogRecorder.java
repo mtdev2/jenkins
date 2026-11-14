@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,44 +21,69 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.logging;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.thoughtworks.xstream.XStream;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.BulkChange;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Util;
 import hudson.XmlFile;
-import hudson.model.*;
-import hudson.util.HttpResponses;
-import jenkins.util.MemoryReductionUtil;
-import jenkins.model.Jenkins;
+import hudson.model.AbstractModelObject;
+import hudson.model.AutoCompletionCandidates;
+import hudson.model.Computer;
+import hudson.model.Saveable;
+import hudson.model.TaskListener;
 import hudson.model.listeners.SaveableListener;
 import hudson.remoting.Channel;
 import hudson.remoting.VirtualChannel;
 import hudson.slaves.ComputerListener;
-import hudson.util.CopyOnWriteList;
+import hudson.util.FormApply;
+import hudson.util.FormValidation;
+import hudson.util.HttpResponses;
 import hudson.util.RingBufferLogHandler;
 import hudson.util.XStream2;
-import jenkins.security.MasterToSlaveCallable;
-import net.sf.json.JSONObject;
-import org.apache.commons.lang.StringUtils;
-import org.kohsuke.stapler.*;
-import org.kohsuke.stapler.interceptor.RequirePOST;
-
-import javax.servlet.ServletException;
+import jakarta.servlet.ServletException;
 import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.text.Collator;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import jenkins.model.Loadable;
+import jenkins.security.MasterToSlaveCallable;
+import jenkins.util.MemoryReductionUtil;
+import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.HttpResponse;
+import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 import org.kohsuke.stapler.verb.POST;
 
 /**
@@ -67,23 +92,39 @@ import org.kohsuke.stapler.verb.POST;
  *
  * TODO: still a work in progress.
  *
- * <h3>Access Control</h3>
+ * <p><strong>Access Control</strong>:
  * {@link LogRecorder} is only visible for administrators and system readers, and this access control happens at
  * {@link jenkins.model.Jenkins#getLog()}, the sole entry point for binding {@link LogRecorder} to URL.
  *
  * @author Kohsuke Kawaguchi
  * @see LogRecorderManager
  */
-public class LogRecorder extends AbstractModelObject implements Saveable {
+public class LogRecorder extends AbstractModelObject implements Loadable, Saveable {
     private volatile String name;
 
-    public final CopyOnWriteList<Target> targets = new CopyOnWriteList<>();
+    private List<Target> loggers = new ArrayList<>();
     private static final TargetComparator TARGET_COMPARATOR = new TargetComparator();
-    
+
+    @DataBoundConstructor
+    public LogRecorder(String name) {
+        this.name = name;
+        // register it only once when constructed, and when this object dies
+        // WeakLogHandler will remove it
+        new WeakLogHandler(handler, Logger.getLogger(""));
+    }
+
+    public List<Target> getLoggers() {
+        return loggers;
+    }
+
+    public void setLoggers(List<Target> loggers) {
+        this.loggers = loggers;
+    }
+
     @Restricted(NoExternalUse.class)
     Target[] orderedTargets() {
         // will contain targets ordered by reverse name length (place specific targets at the beginning)
-        Target[] ts = targets.toArray(new Target[]{});
+        Target[] ts = loggers.toArray(new Target[]{});
 
         Arrays.sort(ts, TARGET_COMPARATOR);
 
@@ -106,7 +147,7 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
 
             String longerPrefix = null;
             for (int i = loggerNameParts.length; i > 0; i--) {
-                String loggerNamePrefix = StringUtils.join(Arrays.copyOf(loggerNameParts, i), ".");
+                String loggerNamePrefix = String.join(".", Arrays.copyOf(loggerNameParts, i));
                 seenPrefixes.put(loggerNamePrefix, seenPrefixes.getOrDefault(loggerNamePrefix, 0) + 1);
                 if (longerPrefix == null) {
                     relevantPrefixes.add(loggerNamePrefix); // actual logger name
@@ -121,6 +162,31 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
             }
         }
         return relevantPrefixes;
+    }
+
+    /**
+     * Validate the name.
+     *
+     * @return {@link FormValidation#ok} if the log target is not empty, otherwise {@link
+     *     FormValidation#warning} with a message explaining the problem.
+     */
+    @NonNull
+    @Restricted(NoExternalUse.class)
+    @VisibleForTesting
+    public FormValidation doCheckName(@QueryParameter String value, @QueryParameter String level) {
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+        try {
+            if ((Util.fixEmpty(level) == null || Level.parse(level).intValue() <= Level.FINE.intValue())
+                    && Util.fixEmpty(value) == null) {
+                return FormValidation.warning(Messages.LogRecorder_Target_Empty_Warning());
+            }
+        } catch (IllegalArgumentException iae) {
+            // We cannot figure out the level, if the name is empty show a warning
+            if (Util.fixEmpty(value) == null) {
+                return FormValidation.warning(Messages.LogRecorder_Target_Empty_Warning());
+            }
+        }
+        return FormValidation.ok();
     }
 
     @Restricted(NoExternalUse.class)
@@ -179,7 +245,7 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
         private transient /* almost final*/ Logger logger;
 
         public Target(String name, Level level) {
-            this(name,level.intValue());
+            this(name, level.intValue());
         }
 
         public Target(String name, int level) {
@@ -189,7 +255,7 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
 
         @DataBoundConstructor
         public Target(String name, String level) {
-            this(name,Level.parse(level));
+            this(name, Level.parse(level));
         }
 
         public Level getLevel() {
@@ -200,30 +266,48 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
             return name;
         }
 
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Target target = (Target) o;
+            return level == target.level && Objects.equals(name, target.name);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(name, level);
+        }
+
         @Deprecated
         public boolean includes(LogRecord r) {
-            if(r.getLevel().intValue() < level)
+            if (r.getLevel().intValue() < level)
                 return false;   // below the threshold
-            if (name.length() == 0) {
+            if (name.isEmpty()) {
                 return true; // like root logger, includes everything
             }
             String logName = r.getLoggerName();
-            if(logName==null || !logName.startsWith(name))
+            if (logName == null || !logName.startsWith(name))
                 return false;   // not within this logger
             String rest = logName.substring(name.length());
-            return rest.startsWith(".") || rest.length()==0;
+            return rest.startsWith(".") || rest.isEmpty();
         }
 
+        @SuppressFBWarnings(value = "NP_BOOLEAN_RETURN_NULL", justification = "converting this to YesNoMaybe would break backward compatibility")
         public Boolean matches(LogRecord r) {
             boolean levelSufficient = r.getLevel().intValue() >= level;
-            if (name.length() == 0) {
+            if (name.isEmpty()) {
                 return levelSufficient; // include if level matches
             }
             String logName = r.getLoggerName();
-            if(logName==null || !logName.startsWith(name))
+            if (logName == null || !logName.startsWith(name))
                 return null; // not in the domain of this logger
             String rest = logName.substring(name.length());
-            if (rest.startsWith(".") || rest.length()==0) {
+            if (rest.startsWith(".") || rest.isEmpty()) {
                 return levelSufficient; // include if level matches
             }
             return null;
@@ -240,10 +324,14 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
          * Makes sure that the logger passes through messages at the correct level to us.
          */
         public void enable() {
-            Logger l = getLogger();
-            if(!l.isLoggable(getLevel()))
-                l.setLevel(getLevel());
+            enableLogger();
             new SetLevel(name, getLevel()).broadcast();
+        }
+
+        private void enableLogger() {
+            Logger l = getLogger();
+            if (!l.isLoggable(getLevel()))
+                l.setLevel(getLevel());
         }
 
         public void disable() {
@@ -252,7 +340,7 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
         }
 
     }
-    
+
     private static class TargetComparator implements Comparator<Target>, Serializable {
 
         private static final long serialVersionUID = 9285340752515798L;
@@ -263,24 +351,27 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
         }
     }
 
-    private static final class SetLevel extends MasterToSlaveCallable<Void,Error> {
+    private static final class SetLevel extends MasterToSlaveCallable<Void, Error> {
         /** known loggers (kept per agent), to avoid GC */
         @SuppressWarnings("MismatchedQueryAndUpdateOfCollection") private static final Set<Logger> loggers = new HashSet<>();
         private final String name;
         private final Level level;
+
         SetLevel(String name, Level level) {
             this.name = name;
             this.level = level;
         }
+
         @Override public Void call() throws Error {
             Logger logger = Logger.getLogger(name);
             loggers.add(logger);
             logger.setLevel(level);
             return null;
         }
+
         void broadcast() {
             for (Computer c : Jenkins.get().getComputers()) {
-                if (c.getName().length() > 0) { // i.e. not master
+                if (!c.getName().isEmpty()) { // i.e. not master
                     VirtualChannel ch = c.getChannel();
                     if (ch != null) {
                         try {
@@ -296,25 +387,20 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
 
     @Extension @Restricted(NoExternalUse.class) public static final class ComputerLogInitializer extends ComputerListener {
         @Override public void preOnline(Computer c, Channel channel, FilePath root, TaskListener listener) throws IOException, InterruptedException {
-            for (LogRecorder recorder : Jenkins.get().getLog().logRecorders.values()) {
-                for (Target t : recorder.targets) {
+            for (LogRecorder recorder : Jenkins.get().getLog().getRecorders()) {
+                for (Target t : recorder.getLoggers()) {
                     channel.call(new SetLevel(t.name, t.getLevel()));
                 }
             }
         }
     }
 
-    public LogRecorder(String name) {
-        this.name = name;
-        // register it only once when constructed, and when this object dies
-        // WeakLogHandler will remove it
-        new WeakLogHandler(handler,Logger.getLogger(""));
-    }
-
+    @Override
     public String getDisplayName() {
         return name;
     }
 
+    @Override
     public String getSearchUrl() {
         return Util.rawEncode(name);
     }
@@ -328,34 +414,91 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
     }
 
     /**
+     * Updates controller logger levels after existing targets are reconfigured or removed. {@link Target#enable()}
+     * only makes a logger more verbose, so it cannot otherwise apply a change such as {@code FINEST} to {@code INFO}.
+     */
+    private void updateLogLevels(List<Target> previousTargets) {
+        List<LogRecorder> recorders = getParent().getRecorders();
+        Set<String> changedTargetNames = new LinkedHashSet<>();
+        for (Target previousTarget : previousTargets) {
+            Target target = getTarget(previousTarget.name, loggers);
+            if (target != null && target.getLevel().intValue() <= previousTarget.getLevel().intValue()) {
+                continue;
+            }
+            changedTargetNames.add(previousTarget.name);
+            if (sameLevel(previousTarget.getLogger().getLevel(), previousTarget.getLevel())) {
+                previousTarget.getLogger().setLevel(null);
+            }
+        }
+
+        for (LogRecorder recorder : recorders) {
+            for (Target target : recorder.loggers) {
+                if (changedTargetNames.contains(target.name)) {
+                    target.enableLogger();
+                }
+            }
+        }
+
+        List<Target> descendantTargets = new ArrayList<>();
+        for (LogRecorder recorder : recorders) {
+            for (Target target : recorder.loggers) {
+                for (String name : changedTargetNames) {
+                    if (isDescendant(name, target.name)) {
+                        descendantTargets.add(target);
+                        break;
+                    }
+                }
+            }
+        }
+        descendantTargets.sort(Comparator.comparingInt(target -> target.name.length()));
+        descendantTargets.forEach(Target::enableLogger);
+    }
+
+    private static Target getTarget(String loggerName, List<Target> targets) {
+        return targets.stream().filter(target -> target.name.equals(loggerName)).findFirst().orElse(null);
+    }
+
+    private static boolean isDescendant(String loggerName, String candidate) {
+        return loggerName.isEmpty()
+                ? !candidate.isEmpty()
+                : candidate.startsWith(loggerName)
+                        && candidate.length() > loggerName.length()
+                        && candidate.charAt(loggerName.length()) == '.';
+    }
+
+    private static boolean sameLevel(Level first, Level second) {
+        return first == null ? second == null : second != null && first.intValue() == second.intValue();
+    }
+
+    /**
      * Accepts submission from the configuration page.
      */
     @POST
-    public synchronized void doConfigSubmit( StaplerRequest req, StaplerResponse rsp ) throws IOException, ServletException {
+    public synchronized void doConfigSubmit(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         Jenkins.get().checkPermission(Jenkins.ADMINISTER);
 
         JSONObject src = req.getSubmittedForm();
 
         String newName = src.getString("name"), redirect = ".";
         XmlFile oldFile = null;
-        if(!name.equals(newName)) {
+        if (!name.equals(newName)) {
             Jenkins.checkGoodName(newName);
             oldFile = getConfigFile();
             // rename
-            getParent().logRecorders.remove(name);
+            List<LogRecorder> recorders = getParent().getRecorders();
+            recorders.remove(new LogRecorder(name));
             this.name = newName;
-            getParent().logRecorders.put(name,this);
+            recorders.add(this);
             redirect = "../" + Util.rawEncode(newName) + '/';
         }
 
-        List<Target> newTargets = req.bindJSONToList(Target.class, src.get("targets"));
-        for (Target t : newTargets)
-            t.enable();
-        targets.replaceBy(newTargets);
+        List<Target> previousTargets = List.copyOf(loggers);
+        List<Target> newTargets = req.bindJSONToList(Target.class, src.get("loggers"));
+        setLoggers(newTargets);
 
-        save();
-        if (oldFile!=null) oldFile.delete();
-        rsp.sendRedirect2(redirect);
+        save(previousTargets);
+        if (oldFile != null) oldFile.delete();
+        FormApply.success(redirect).generateResponse(req, rsp, null);
     }
 
     @RequirePOST
@@ -369,45 +512,81 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
     /**
      * Loads the settings from a file.
      */
+    @Override
     public synchronized void load() throws IOException {
         getConfigFile().unmarshal(this);
-        for (Target t : targets)
-            t.enable();
+        loggers.forEach(Target::enable);
     }
 
     /**
      * Save the settings to a file.
      */
+    @Override
     public synchronized void save() throws IOException {
-        if(BulkChange.contains(this))   return;
+        save(null);
+    }
+
+    private synchronized void save(List<Target> previousTargets) throws IOException {
+        if (BulkChange.contains(this))   return;
+
         getConfigFile().write(this);
+        loggers.forEach(Target::enable);
+        if (previousTargets != null) {
+            updateLogLevels(previousTargets);
+        }
+
         SaveableListener.fireOnChange(this, getConfigFile());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        LogRecorder that = (LogRecorder) o;
+        return name.equals(that.name);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name);
     }
 
     /**
      * Deletes this recorder, then go back to the parent.
      */
     @RequirePOST
-    public synchronized void doDoDelete(StaplerResponse rsp) throws IOException, ServletException {
+    public synchronized void doDoDelete(StaplerResponse2 rsp) throws IOException, ServletException {
+        delete();
+        rsp.sendRedirect2("..");
+    }
+
+    /**
+     * Deletes this log recorder.
+     * @throws IOException In case anything went wrong while deleting the configuration file.
+     * @since 2.425
+     */
+    public void delete() throws IOException {
         Jenkins.get().checkPermission(Jenkins.ADMINISTER);
 
         getConfigFile().delete();
-        getParent().logRecorders.remove(name);
+        getParent().getRecorders().remove(new LogRecorder(name));
         // Disable logging for all our targets,
         // then reenable all other loggers in case any also log the same targets
-        for (Target t : targets)
-            t.disable();
-        for (LogRecorder log : getParent().logRecorders.values())
-            for (Target t : log.targets)
-                t.enable();
-        rsp.sendRedirect2("..");
+        loggers.forEach(Target::disable);
+
+        getParent().getRecorders().forEach(logRecorder -> logRecorder.getLoggers().forEach(Target::enable));
+        SaveableListener.fireOnDeleted(this, getConfigFile());
     }
 
     /**
      * RSS feed for log entries.
      */
-    public void doRss( StaplerRequest req, StaplerResponse rsp ) throws IOException, ServletException {
-        LogRecorderManager.doRss(req,rsp,getLogRecords());
+    public void doRss(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
+        LogRecorderManager.doRss(req, rsp, getLogRecords());
     }
 
     /**
@@ -429,22 +608,23 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
      * @return a map (sorted by display name) from computer to (nonempty) list of log records
      * @since 1.519
      */
-    public Map<Computer,List<LogRecord>> getSlaveLogRecords() {
-        Map<Computer,List<LogRecord>> result = new TreeMap<>(new Comparator<Computer>() {
+    public Map<Computer, List<LogRecord>> getSlaveLogRecords() {
+        Map<Computer, List<LogRecord>> result = new TreeMap<>(new Comparator<>() {
             final Collator COLL = Collator.getInstance();
 
+            @Override
             public int compare(Computer c1, Computer c2) {
                 return COLL.compare(c1.getDisplayName(), c2.getDisplayName());
             }
         });
         for (Computer c : Jenkins.get().getComputers()) {
-            if (c.getName().length() == 0) {
+            if (c.getName().isEmpty()) {
                 continue; // master
             }
             List<LogRecord> recs = new ArrayList<>();
             try {
                 for (LogRecord rec : c.getLogRecords()) {
-                    for (Target t : targets) {
+                    for (Target t : loggers) {
                         if (t.includes(rec)) {
                             recs.add(rec);
                             break;
@@ -467,8 +647,8 @@ public class LogRecorder extends AbstractModelObject implements Saveable {
     public static final XStream XSTREAM = new XStream2();
 
     static {
-        XSTREAM.alias("log",LogRecorder.class);
-        XSTREAM.alias("target",Target.class);
+        XSTREAM.alias("log", LogRecorder.class);
+        XSTREAM.alias("target", Target.class);
     }
 
     /**

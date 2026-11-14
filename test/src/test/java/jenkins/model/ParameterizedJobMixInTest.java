@@ -21,67 +21,103 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.model;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.arrayWithSize;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import hudson.model.FreeStyleProject;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Queue;
 import hudson.model.StringParameterDefinition;
-import javax.servlet.http.HttpServletResponse;
-
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
+import jakarta.servlet.http.HttpServletResponse;
+import java.net.URL;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+
 
 /**
  * Tests of {@link ParameterizedJobMixIn}.
  * @author Oleg Nenashev
  */
-public class ParameterizedJobMixInTest {
-    
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-    
+@WithJenkins
+class ParameterizedJobMixInTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
     @Test
-    public void doBuild_shouldFailWhenInvokingDisabledProject() throws Exception {
+    void doBuild_shouldFailWhenInvokingDisabledProject() throws Exception {
         final FreeStyleProject project = j.createFreeStyleProject();
         project.doDisable();
-        
+
         final JenkinsRule.WebClient webClient = j.createWebClient();
         webClient.assertFails(project.getUrl() + "build", HttpServletResponse.SC_CONFLICT);
     }
-    
+
     @Test
     @Issue("JENKINS-36193")
-    public void doBuildWithParameters_shouldFailWhenInvokingDisabledProject() throws Exception {
+    void doBuildWithParameters_shouldFailWhenInvokingDisabledProject() throws Exception {
         final FreeStyleProject project = j.createFreeStyleProject();
         project.addProperty(new ParametersDefinitionProperty(new StringParameterDefinition("FOO", "BAR")));
         project.doDisable();
-        
+
         final JenkinsRule.WebClient webClient = j.createWebClient();
-        webClient.assertFails(project.getUrl() + "buildWithParameters", HttpServletResponse.SC_CONFLICT);
+
+        FailingHttpStatusCodeException fex = assertThrows(
+                FailingHttpStatusCodeException.class,
+                () -> webClient.getPage(webClient.addCrumb(new WebRequest(new URL(j.getURL(), project.getUrl() + "buildWithParameters?FOO=x"), HttpMethod.POST))),
+                "should fail when invoking disabled project");
+        assertThat("Should fail with conflict", fex.getStatusCode(), is(HttpServletResponse.SC_CONFLICT));
+    }
+
+    @Test
+    void doBuildWithParameters_shouldFailWhenInvokingNonParameterizedProject() throws Exception {
+        final FreeStyleProject project = j.createFreeStyleProject();
+
+        final JenkinsRule.WebClient webClient = j.createWebClient();
+
+        FailingHttpStatusCodeException fex = assertThrows(
+                FailingHttpStatusCodeException.class,
+                () -> webClient.getPage(webClient.addCrumb(new WebRequest(new URL(j.getURL(), project.getUrl() + "buildWithParameters?FOO=x"), HttpMethod.POST))),
+                "should fail when invoking non-parameterized project");
+        assertThat("Should fail with bad request", fex.getStatusCode(), is(HttpServletResponse.SC_BAD_REQUEST));
     }
 
     @Test
     @Issue("JENKINS-48770")
-    public void doBuildQuietPeriodInSeconds() throws Exception {
+    void doBuildQuietPeriodInSeconds() throws Exception {
         final int projectQuietPeriodInSeconds = 50;
 
         final FreeStyleProject project = j.createFreeStyleProject();
         project.setQuietPeriod(projectQuietPeriodInSeconds);
 
         final JenkinsRule.WebClient webClient = j.createWebClient();
-        webClient.goTo(project.getUrl() + "build", "");
+        webClient.getPage(webClient.addCrumb(new WebRequest(new URL(j.getURL(), project.getUrl() + "build"), HttpMethod.POST)));
         long triggerTime = System.currentTimeMillis();
 
-        Queue.Item item = Jenkins.get().getQueue().getItem(1);
-        Assert.assertTrue(item instanceof Queue.WaitingItem);
-        Assert.assertTrue(item.task instanceof FreeStyleProject);
+        Queue.Item[] items = Jenkins.get().getQueue().getItems();
+        assertThat(items, arrayWithSize(1));
+        assertThat(items[0], instanceOf(Queue.WaitingItem.class));
+        assertThat(items[0].task, instanceOf(FreeStyleProject.class));
 
-        Queue.WaitingItem waitingItem = (Queue.WaitingItem) item;
-        Assert.assertTrue((waitingItem.timestamp.getTimeInMillis() - triggerTime) > 45000);
+        Queue.WaitingItem waitingItem = (Queue.WaitingItem) items[0];
+        assertTrue(waitingItem.timestamp.getTimeInMillis() - triggerTime > 45000);
 
         Jenkins.get().getQueue().doCancelItem(1);
     }

@@ -21,45 +21,51 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security.seed;
 
-import com.gargoylesoftware.htmlunit.ElementNotFoundException;
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import com.gargoylesoftware.htmlunit.xml.XmlPage;
-import hudson.model.User;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import test.security.realm.InMemorySecurityRealm;
-
-import java.net.URL;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.xml.HasXPath.hasXPath;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-public class UserSeedPropertyTest {
+import hudson.model.User;
+import java.net.URI;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import org.htmlunit.ElementNotFoundException;
+import org.htmlunit.FailingHttpStatusCodeException;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.htmlunit.html.HtmlPage;
+import org.htmlunit.xml.XmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import test.security.realm.InMemorySecurityRealm;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+@WithJenkins
+class UserSeedPropertyTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
     @Issue("SECURITY-901")
-    public void userCreation_implies_userSeedCreation() throws Exception {
+    void userCreation_implies_userSeedCreation() {
         User alice = User.getById("alice", true);
         assertNotNull(alice);
         UserSeedProperty userSeed = alice.getProperty(UserSeedProperty.class);
@@ -69,7 +75,7 @@ public class UserSeedPropertyTest {
 
     @Test
     @Issue("SECURITY-901")
-    public void userSeedRenewal_changeTheSeed() throws Exception {
+    void userSeedRenewal_changeTheSeed() throws Exception {
         j.jenkins.setCrumbIssuer(null);
         Set<String> seeds = new HashSet<>();
 
@@ -92,7 +98,7 @@ public class UserSeedPropertyTest {
 
     @Test
     @Issue("SECURITY-901")
-    public void initialUserSeedIsAlwaysDifferent() throws Exception {
+    void initialUserSeedIsAlwaysDifferent() throws Exception {
         Set<String> seeds = new HashSet<>();
 
         int times = 10;
@@ -110,7 +116,7 @@ public class UserSeedPropertyTest {
 
     @Test
     @Issue("SECURITY-901")
-    public void differentUserHaveDifferentInitialSeeds() throws Exception {
+    void differentUserHaveDifferentInitialSeeds() {
         Set<String> seeds = new HashSet<>();
 
         List<String> userIds = Arrays.asList("Alice", "Bob", "Charles", "Derek", "Edward");
@@ -127,7 +133,7 @@ public class UserSeedPropertyTest {
 
     @Test
     @Issue("SECURITY-901")
-    public void userCreatedInThirdPartyRealm_cannotReconnect_afterSessionInvalidation_andRealmDeletion() throws Exception {
+    void userCreatedInThirdPartyRealm_cannotReconnect_afterSessionInvalidation_andRealmDeletion() throws Exception {
         InMemorySecurityRealm realm = new InMemorySecurityRealm();
         j.jenkins.setSecurityRealm(realm);
         j.jenkins.setCrumbIssuer(null);
@@ -156,17 +162,13 @@ public class UserSeedPropertyTest {
         assertUserNotConnected(wc, ALICE);
         assertUserConnected(wc, "anonymous");
 
-        try {
-            wc.login(ALICE);
-            fail("Alice does not exist any longer and so should not be able to login");
-        } catch (FailingHttpStatusCodeException e) {
-            assertEquals(401, e.getStatusCode());
-        }
+        FailingHttpStatusCodeException e = assertThrows(FailingHttpStatusCodeException.class, () -> wc.login(ALICE), "Alice does not exist any longer and so should not be able to login");
+        assertEquals(401, e.getStatusCode());
     }
 
     @Test
     @Issue("SECURITY-901")
-    public void userAfterBeingDeletedInThirdPartyRealm_canStillUseTheirSession_withDisabledSeed() throws Exception {
+    void userAfterBeingDeletedInThirdPartyRealm_canStillUseTheirSession_withDisabledSeed() throws Exception {
         boolean currentStatus = UserSeedProperty.DISABLE_USER_SEED;
         try {
             UserSeedProperty.DISABLE_USER_SEED = true;
@@ -194,12 +196,8 @@ public class UserSeedPropertyTest {
             // even after the security realm deleted the user, they can still connect, until session invalidation
             assertUserConnected(wc, ALICE);
 
-            try {
-                requestRenewSeedForUser(alice);
-                fail("The feature should be disabled");
-            } catch (FailingHttpStatusCodeException e) {
-                // as the feature is disabled, we cannot renew the seed
-            }
+            // as the feature is disabled, we cannot renew the seed
+            assertThrows(FailingHttpStatusCodeException.class, () -> requestRenewSeedForUser(alice), "The feature should be disabled");
 
             // failed attempt to renew the seed does not have any effect
             assertUserConnected(wc, ALICE);
@@ -211,12 +209,8 @@ public class UserSeedPropertyTest {
             assertUserConnected(wc, ALICE);
 
             JenkinsRule.WebClient wc2 = j.createWebClient();
-            try {
-                wc2.login(ALICE);
-                fail("Alice is not longer backed by security realm");
-            } catch (FailingHttpStatusCodeException e) {
-                assertEquals(401, e.getStatusCode());
-            }
+            FailingHttpStatusCodeException e = assertThrows(FailingHttpStatusCodeException.class, () -> wc2.login(ALICE), "Alice is not longer backed by security realm");
+            assertEquals(401, e.getStatusCode());
         } finally {
             UserSeedProperty.DISABLE_USER_SEED = currentStatus;
         }
@@ -224,7 +218,7 @@ public class UserSeedPropertyTest {
 
     @Test
     @Issue("SECURITY-901")
-    public void userCreatedInThirdPartyRealm_canReconnect_afterSessionInvalidation() throws Exception {
+    void userCreatedInThirdPartyRealm_canReconnect_afterSessionInvalidation() throws Exception {
         InMemorySecurityRealm realm = new InMemorySecurityRealm();
         j.jenkins.setSecurityRealm(realm);
         j.jenkins.setCrumbIssuer(null);
@@ -253,7 +247,7 @@ public class UserSeedPropertyTest {
     }
 
     @Test
-    public void userSeedSection_isCorrectlyDisplayed() throws Exception {
+    void userSeedSection_isCorrectlyDisplayed() throws Exception {
         InMemorySecurityRealm realm = new InMemorySecurityRealm();
         j.jenkins.setSecurityRealm(realm);
         j.jenkins.setCrumbIssuer(null);
@@ -268,12 +262,12 @@ public class UserSeedPropertyTest {
         User alice = User.getById(ALICE, false);
         assertNotNull(alice);
 
-        HtmlPage htmlPage = wc.goTo(alice.getUrl() + "/configure");
+        HtmlPage htmlPage = wc.goTo(alice.getUrl() + "/security/");
         htmlPage.getDocumentElement().getOneHtmlElementByAttribute("div", "class", "user-seed-panel");
     }
-    
+
     @Test
-    public void userSeedSection_isCorrectlyHidden_withSpecificSetting() throws Exception {
+    void userSeedSection_isCorrectlyHidden_withSpecificSetting() throws Exception {
         boolean currentStatus = UserSeedProperty.HIDE_USER_SEED_SECTION;
         try {
             UserSeedProperty.HIDE_USER_SEED_SECTION = true;
@@ -292,18 +286,14 @@ public class UserSeedPropertyTest {
             User alice = User.getById(ALICE, false);
             assertNotNull(alice);
 
-            HtmlPage htmlPage = wc.goTo(alice.getUrl() + "/configure");
-            try {
-                htmlPage.getDocumentElement().getOneHtmlElementByAttribute("div", "class", "user-seed-panel");
-                fail("Seed section should not be displayed");
-            } 
-            catch (ElementNotFoundException e) {}
+            HtmlPage htmlPage = wc.goTo(alice.getUrl() + "/security/");
+            assertThrows(ElementNotFoundException.class, () -> htmlPage.getDocumentElement().getOneHtmlElementByAttribute("div", "class", "user-seed-panel"), "Seed section should not be displayed");
         }
         finally {
             UserSeedProperty.HIDE_USER_SEED_SECTION = currentStatus;
         }
     }
-    
+
     private void assertUserConnected(JenkinsRule.WebClient wc, String expectedUsername) throws Exception {
         XmlPage page = (XmlPage) wc.goTo("whoAmI/api/xml", "application/xml");
         assertThat(page, hasXPath("//name", is(expectedUsername)));
@@ -316,7 +306,7 @@ public class UserSeedPropertyTest {
 
     private void requestRenewSeedForUser(User user) throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient();
-        WebRequest request = new WebRequest(new URL(j.jenkins.getRootUrl() + user.getUrl() + "/descriptorByName/" + UserSeedProperty.class.getName() + "/renewSessionSeed/"), HttpMethod.POST);
+        WebRequest request = new WebRequest(new URI(j.jenkins.getRootUrl() + user.getUrl() + "/descriptorByName/" + UserSeedProperty.class.getName() + "/renewSessionSeed/").toURL(), HttpMethod.POST);
         wc.getPage(request);
     }
 }

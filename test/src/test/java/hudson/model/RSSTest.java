@@ -21,21 +21,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import com.gargoylesoftware.htmlunit.xml.XmlPage;
-import jenkins.model.Jenkins;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.FailureBuilder;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.MockAuthorizationStrategy;
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.emptyString;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import java.io.IOException;
 import java.text.DateFormat;
@@ -45,15 +43,23 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import jenkins.model.Jenkins;
+import org.htmlunit.xml.XmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.FailureBuilder;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
-
-public class RSSTest {
+@WithJenkins
+class RSSTest {
 
     private static final String ROOT_PATH_PREFIX = "";
     private static final String FAILED_BUILD_TITLE = "test0 #1 (broken since this build)";
@@ -62,12 +68,16 @@ public class RSSTest {
     private static final String FAILED_BUILD_TYPE = "failed";
     private static final String LATEST_BUILD_TYPE = "latest";
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
     @Issue("JENKINS-59167")
-    public void absoluteURLsPresentInRSS_evenWithoutRootUrlSetup_View() throws Exception {
+    void absoluteURLsPresentInRSS_evenWithoutRootUrlSetup_View() throws Exception {
         String pathPrefix = ROOT_PATH_PREFIX;
         XmlPage page = getRssAllPage(pathPrefix);
         NodeList allLinks = page.getXmlDocument().getElementsByTagName("link");
@@ -85,7 +95,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkInitialContent_Rss_All_AllView() throws Exception {
+    void checkInitialContent_Rss_All_AllView() throws Exception {
         String pathPrefix = ROOT_PATH_PREFIX;
         int expectedNodes = 3;
         XmlPage page = getRssAllPage(pathPrefix);
@@ -94,7 +104,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkInitialContent_Rss_Failed_AllView() throws Exception {
+    void checkInitialContent_Rss_Failed_AllView() throws Exception {
         String pathPrefix = ROOT_PATH_PREFIX;
         int expectedNodes = 3;
         XmlPage page = getRssFailedPage(pathPrefix);
@@ -103,7 +113,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkInitialContent_Atom_All_AllView() throws Exception {
+    void checkInitialContent_Atom_All_AllView() throws Exception {
         int expectedNodes = 5;
         XmlPage page = getRssAllAtomPage();
         Element documentElement = page.getXmlDocument().getDocumentElement();
@@ -112,7 +122,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_All_AllView() throws Exception {
+    void checkWithSingleBuild_Rss_All_AllView() throws Exception {
         runSuccessfulBuild();
 
         String pathPrefix = ROOT_PATH_PREFIX;
@@ -124,7 +134,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_Failed_AllView() throws Exception {
+    void checkWithSingleBuild_Rss_Failed_AllView() throws Exception {
         runFailingBuild();
 
         String pathPrefix = ROOT_PATH_PREFIX;
@@ -136,7 +146,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Atom_All_AllView() throws Exception {
+    void checkWithSingleBuild_Atom_All_AllView() throws Exception {
         runSuccessfulBuild();
 
         String displayName = "All";
@@ -148,7 +158,7 @@ public class RSSTest {
 
     @Test
     @Issue("JENKINS-59167")
-    public void absoluteURLsPresentInAtom_evenWithoutRootUrlSetup_View() throws Exception {
+    void absoluteURLsPresentInAtom_evenWithoutRootUrlSetup_View() throws Exception {
         XmlPage page = getRssAllAtomPage();
         NodeList allLinks = page.getXmlDocument().getElementsByTagName("link");
 
@@ -166,7 +176,7 @@ public class RSSTest {
 
     @Issue("JENKINS-60577")
     @Test
-    public void latestBuilds_AllView() throws Exception {
+    void latestBuilds_AllView() throws Exception {
         String pathPrefix = ROOT_PATH_PREFIX;
         String displayName = "All";
         String buildType = LATEST_BUILD_TYPE;
@@ -176,11 +186,11 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_All_Computer() throws Exception {
+    void checkWithSingleBuild_Rss_All_Computer() throws Exception {
         runSuccessfulBuild();
 
-        String pathPrefix = "computer/(master)/";
-        String displayName = "master";
+        String pathPrefix = "computer/(built-in)/";
+        String displayName = Messages.Hudson_Computer_DisplayName();
         String buildType = ALL_BUILD_TYPE;
         String buildTitle = STABLE_BUILD_TITLE;
         XmlPage page = getRssAllPage(pathPrefix);
@@ -188,11 +198,11 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_Failed_Computer() throws Exception {
+    void checkWithSingleBuild_Rss_Failed_Computer() throws Exception {
         runFailingBuild();
 
-        String pathPrefix = "computer/(master)/";
-        String displayName = "master";
+        String pathPrefix = "computer/(built-in)/";
+        String displayName = Messages.Hudson_Computer_DisplayName();
         String buildType = FAILED_BUILD_TYPE;
         String buildTitle = FAILED_BUILD_TITLE;
         XmlPage page = getRssFailedPage(pathPrefix);
@@ -200,9 +210,9 @@ public class RSSTest {
     }
 
     @Test
-    public void latestBuilds_Computer() throws Exception {
-        String pathPrefix = "computer/(master)/";
-        String displayName = "master";
+    void latestBuilds_Computer() throws Exception {
+        String pathPrefix = "computer/(built-in)/";
+        String displayName = Messages.Hudson_Computer_DisplayName();
         String buildType = LATEST_BUILD_TYPE;
         int expectedLinks = 3;
         int expectedAllLinks = 6;
@@ -210,7 +220,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_All_Job() throws Exception {
+    void checkWithSingleBuild_Rss_All_Job() throws Exception {
         runSuccessfulBuild();
 
         String pathPrefix = "job/test0/";
@@ -222,7 +232,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_Failed_Job() throws Exception {
+    void checkWithSingleBuild_Rss_Failed_Job() throws Exception {
         runFailingBuild();
 
         String pathPrefix = "job/test0/";
@@ -234,7 +244,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_All_NewView() throws Exception {
+    void checkWithSingleBuild_Rss_All_NewView() throws Exception {
         FreeStyleProject p = runSuccessfulBuild();
 
         ListView newView = new ListView("newView");
@@ -250,7 +260,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_All_User() throws Exception {
+    void checkWithSingleBuild_Rss_All_User() throws Exception {
         String userId = "alice";
         JenkinsRule.WebClient wc = loginAsUser(userId);
 
@@ -265,7 +275,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkWithSingleBuild_Rss_Failed_User() throws Exception {
+    void checkWithSingleBuild_Rss_Failed_User() throws Exception {
         String userId = "alice";
         JenkinsRule.WebClient wc = loginAsUser(userId);
 
@@ -280,7 +290,7 @@ public class RSSTest {
     }
 
     @Test
-    public void latestBuilds_User() throws Exception {
+    void latestBuilds_User() throws Exception {
         String userId = "alice";
         JenkinsRule.WebClient wc = loginAsUser(userId);
         String pathPrefix = "user/alice";
@@ -292,7 +302,7 @@ public class RSSTest {
     }
 
     @Test
-    public void latestBuilds_User_NotCaused() throws Exception {
+    void latestBuilds_User_NotCaused() throws Exception {
         String userId = "alice";
         JenkinsRule.WebClient wc = loginAsUser(userId);
         String pathPrefix = "user/alice";
@@ -304,7 +314,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkInitialContent_Atom_AllLog() throws Exception {
+    void checkInitialContent_Atom_AllLog() throws Exception {
         JenkinsRule.WebClient webClient = j.createWebClient();
         XmlPage page = (XmlPage) webClient.goTo("log/rss", "application/atom+xml");
         Document xmlDocument = page.getXmlDocument();
@@ -315,7 +325,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkInitialContent_Atom_SevereLog() throws Exception {
+    void checkInitialContent_Atom_SevereLog() throws Exception {
         JenkinsRule.WebClient webClient = j.createWebClient();
         XmlPage page = (XmlPage) webClient.goTo("log/rss?level=SEVERE", "application/atom+xml");
         Document xmlDocument = page.getXmlDocument();
@@ -326,7 +336,7 @@ public class RSSTest {
     }
 
     @Test
-    public void checkInitialContent_Atom_WarningLog() throws Exception {
+    void checkInitialContent_Atom_WarningLog() throws Exception {
         JenkinsRule.WebClient webClient = j.createWebClient();
         XmlPage page = (XmlPage) webClient.goTo("log/rss?level=WARNING", "application/atom+xml");
         Document xmlDocument = page.getXmlDocument();
@@ -462,7 +472,7 @@ public class RSSTest {
 
     private FreeStyleProject runSuccessfulBuild() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
-        j.assertBuildStatusSuccess(p.scheduleBuild2(0));
+        j.buildAndAssertSuccess(p);
         return p;
     }
 
@@ -475,7 +485,7 @@ public class RSSTest {
     private void runFailingBuild() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         p.getBuildersList().add(new FailureBuilder());
-        j.assertBuildStatus(Result.FAILURE, p.scheduleBuild2(0).get());
+        j.buildAndAssertStatus(Result.FAILURE, p);
     }
 
     private void runFailingBuild(String userId) throws Exception {

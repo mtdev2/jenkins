@@ -21,19 +21,22 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import net.sf.json.JSONObject;
-import org.jenkinsci.Symbol;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.DataBoundConstructor;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
 import hudson.util.Secret;
+import java.util.Objects;
+import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.DoNotUse;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-
-import java.util.Objects;
+import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * Parameter whose value is a {@link Secret} and is hidden from the UI.
@@ -49,22 +52,21 @@ public class PasswordParameterDefinition extends SimpleParameterDefinition {
     private Secret defaultValue;
 
     @Deprecated
-    public PasswordParameterDefinition(String name, String defaultValue, String description) {
+    public PasswordParameterDefinition(@NonNull String name, @CheckForNull String defaultValue, @CheckForNull String description) {
         super(name, description);
         this.defaultValue = Secret.fromString(defaultValue);
     }
 
     // TODO consider switching @DataBoundConstructor to a PasswordParameterDefinition(String) overload
     @DataBoundConstructor
-    public PasswordParameterDefinition(String name, Secret defaultValueAsSecret, String description) {
+    public PasswordParameterDefinition(@NonNull String name, @CheckForNull Secret defaultValueAsSecret, @CheckForNull String description) {
         super(name, description);
         this.defaultValue = defaultValueAsSecret;
     }
 
     @Override
     public ParameterDefinition copyWithDefaultValue(ParameterValue defaultValue) {
-        if (defaultValue instanceof PasswordParameterValue) {
-            PasswordParameterValue value = (PasswordParameterValue) defaultValue;
+        if (defaultValue instanceof PasswordParameterValue value) {
             return new PasswordParameterDefinition(getName(), Secret.toString(value.getValue()), getDescription());
         } else {
             return this;
@@ -77,7 +79,7 @@ public class PasswordParameterDefinition extends SimpleParameterDefinition {
     }
 
     @Override
-    public PasswordParameterValue createValue(StaplerRequest req, JSONObject jo) {
+    public PasswordParameterValue createValue(StaplerRequest2 req, JSONObject jo) {
         PasswordParameterValue value = req.bindJSON(PasswordParameterValue.class, jo);
         if (value.getValue().getPlainText().equals(DEFAULT_VALUE)) {
             value = new PasswordParameterValue(getName(), getDefaultValue());
@@ -91,6 +93,7 @@ public class PasswordParameterDefinition extends SimpleParameterDefinition {
         return new PasswordParameterValue(getName(), getDefaultValue(), getDescription());
     }
 
+    @NonNull
     public String getDefaultValue() {
         return Secret.toString(defaultValue);
     }
@@ -114,6 +117,7 @@ public class PasswordParameterDefinition extends SimpleParameterDefinition {
     }
 
     @Override
+    @SuppressFBWarnings(value = "EQ_GETCLASS_AND_CLASS_CONSTANT", justification = "ParameterDefinitionTest tests that subclasses are not equal to their parent classes, so the behavior appears to be intentional")
     public boolean equals(Object obj) {
         if (PasswordParameterDefinition.class != getClass())
             return super.equals(obj);
@@ -131,8 +135,9 @@ public class PasswordParameterDefinition extends SimpleParameterDefinition {
         return Objects.equals(defaultValue, other.defaultValue);
     }
 
-    @Extension @Symbol({"password"})
+    @Extension @Symbol("password")
     public static final class ParameterDescriptorImpl extends ParameterDescriptor {
+        @NonNull
         @Override
         public String getDisplayName() {
             return Messages.PasswordParameterDefinition_DisplayName();

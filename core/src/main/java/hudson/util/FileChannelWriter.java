@@ -1,18 +1,18 @@
 package hudson.util;
 
-import org.kohsuke.accmod.Restricted;
-import org.kohsuke.accmod.restrictions.NoExternalUse;
-
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.channels.Channel;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.util.logging.Logger;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * This class has been created to help make {@link AtomicFileWriter} hopefully more reliable in some corner cases.
@@ -23,11 +23,11 @@ import java.util.logging.Logger;
  * <p>The goal using this is to reduce as much as we can the likeliness to see zero-length files be created in place
  * of the original ones.</p>
  *
- * @see <a href="https://issues.jenkins-ci.org/browse/JENKINS-34855">JENKINS-34855</a>
+ * @see <a href="https://issues.jenkins.io/browse/JENKINS-34855">JENKINS-34855</a>
  * @see <a href="https://github.com/jenkinsci/jenkins/pull/2548">PR-2548</a>
  */
 @Restricted(NoExternalUse.class)
-public class FileChannelWriter extends Writer {
+public class FileChannelWriter extends Writer implements Channel {
 
     private static final Logger LOGGER = Logger.getLogger(FileChannelWriter.class.getName());
 
@@ -84,8 +84,13 @@ public class FileChannelWriter extends Writer {
     }
 
     @Override
+    public boolean isOpen() {
+        return channel.isOpen();
+    }
+
+    @Override
     public void close() throws IOException {
-        if(channel.isOpen()) {
+        if (channel.isOpen()) {
             if (forceOnClose) {
                 channel.force(true);
             }

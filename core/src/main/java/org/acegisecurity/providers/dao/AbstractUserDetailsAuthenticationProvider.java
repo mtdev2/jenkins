@@ -24,6 +24,7 @@
 
 package org.acegisecurity.providers.dao;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.acegisecurity.AcegiSecurityException;
 import org.acegisecurity.Authentication;
 import org.acegisecurity.AuthenticationException;
@@ -37,17 +38,25 @@ import org.acegisecurity.userdetails.UserDetails;
 @Deprecated
 public abstract class AbstractUserDetailsAuthenticationProvider implements AuthenticationProvider {
 
-    private final org.springframework.security.authentication.dao.AbstractUserDetailsAuthenticationProvider delegate = new org.springframework.security.authentication.dao.AbstractUserDetailsAuthenticationProvider() {
+    private final org.springframework.security.authentication.dao.AbstractUserDetailsAuthenticationProvider delegate =
+            new org.springframework.security.authentication.dao.AbstractUserDetailsAuthenticationProvider() {
         @Override
-        protected void additionalAuthenticationChecks(org.springframework.security.core.userdetails.UserDetails userDetails, org.springframework.security.authentication.UsernamePasswordAuthenticationToken authentication) throws org.springframework.security.core.AuthenticationException {
+        protected void additionalAuthenticationChecks(
+                org.springframework.security.core.userdetails.UserDetails userDetails,
+                org.springframework.security.authentication.UsernamePasswordAuthenticationToken authentication)
+                throws org.springframework.security.core.AuthenticationException {
             try {
                 AbstractUserDetailsAuthenticationProvider.this.additionalAuthenticationChecks(UserDetails.fromSpring(userDetails), new UsernamePasswordAuthenticationToken(authentication));
             } catch (AcegiSecurityException x) {
                 throw x.toSpring();
             }
         }
+
         @Override
-        protected org.springframework.security.core.userdetails.UserDetails retrieveUser(String username, org.springframework.security.authentication.UsernamePasswordAuthenticationToken authentication) throws org.springframework.security.core.AuthenticationException {
+        protected org.springframework.security.core.userdetails.UserDetails retrieveUser(
+                String username,
+                org.springframework.security.authentication.UsernamePasswordAuthenticationToken authentication)
+                throws org.springframework.security.core.AuthenticationException {
             try {
                 return AbstractUserDetailsAuthenticationProvider.this.retrieveUser(username, new UsernamePasswordAuthenticationToken(authentication)).toSpring();
             } catch (AcegiSecurityException x) {
@@ -61,6 +70,7 @@ public abstract class AbstractUserDetailsAuthenticationProvider implements Authe
     protected abstract UserDetails retrieveUser(String username, UsernamePasswordAuthenticationToken authentication) throws AuthenticationException;
 
     @Override
+    @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "TODO needs triage")
     public Authentication authenticate(Authentication authentication) throws AuthenticationException {
         try {
             return Authentication.fromSpring(delegate.authenticate(authentication.toSpring()));
@@ -73,7 +83,7 @@ public abstract class AbstractUserDetailsAuthenticationProvider implements Authe
     public boolean supports(Class authentication) {
         return UsernamePasswordAuthenticationToken.class.isAssignableFrom(authentication);
     }
-    
+
     // TODO other methods as needed: createSuccessAuthentication, getUserCache, etc.
 
 }

@@ -1,26 +1,31 @@
 package jenkins.bugs;
 
-import org.junit.BeforeClass;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-
 import hudson.security.HudsonPrivateSecurityRealm;
 import jenkins.model.Jenkins;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class Jenkins41511Test {
+@WithJenkins
+class Jenkins41511Test {
 
-    @BeforeClass
-    public static void setUpClass() {
-        System.setProperty(Jenkins.class.getName()+".slaveAgentPort", "10000");
-        System.setProperty(Jenkins.class.getName()+".slaveAgentPortEnforce", "true");
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
     }
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    @BeforeAll
+    static void setUpClass() {
+        System.setProperty(Jenkins.class.getName() + ".slaveAgentPort", "10000");
+        System.setProperty(Jenkins.class.getName() + ".slaveAgentPortEnforce", "true");
+    }
 
     @Test
-    public void configRoundTrip() throws Exception {
+    void configRoundTrip() throws Exception {
         Jenkins.get().setSecurityRealm(new HudsonPrivateSecurityRealm(true, false, null));
         j.submit(j.createWebClient().goTo("configureSecurity").getFormByName("config"));
     }

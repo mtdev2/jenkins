@@ -1,136 +1,84 @@
 package jenkins.security;
 
-import hudson.model.Node.Mode;
-import hudson.model.Slave;
-import hudson.remoting.Channel;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import hudson.slaves.DumbSlave;
-import hudson.slaves.JNLPLauncher;
-import hudson.slaves.RetentionStrategy;
-import java.io.File;
-import org.apache.tools.ant.util.JavaEnvUtils;
-import org.junit.After;
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.IOException;
+import java.util.logging.Level;
+import org.codehaus.groovy.runtime.MethodClosure;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
-
-import java.io.Serializable;
-import java.util.Collections;
-import java.util.logging.Level;
-import org.apache.commons.io.FileUtils;
-import org.codehaus.groovy.runtime.MethodClosure;
-import static org.hamcrest.Matchers.containsString;
-
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.fail;
-import org.junit.rules.TemporaryFolder;
-import org.jvnet.hudson.test.LoggerRule;
+import org.jvnet.hudson.test.LogRecorder;
+import org.jvnet.hudson.test.junit.jupiter.InboundAgentExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * @author Kohsuke Kawaguchi
  */
 @Issue("SECURITY-218")
-public class Security218Test implements Serializable {
-    @Rule
-    public transient JenkinsRule j = new JenkinsRule();
+@WithJenkins
+class Security218Test {
 
-    @Rule
-    public TemporaryFolder tmp = new TemporaryFolder();
+    @RegisterExtension
+    private final InboundAgentExtension inboundAgents = new InboundAgentExtension();
 
-    @Rule
-    public LoggerRule logging = new LoggerRule().record(ClassFilterImpl.class, Level.FINE);
+    private final LogRecorder logging = new LogRecorder().record(ClassFilterImpl.class, Level.FINE);
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     /**
-     * JNLP slave.
-     */
-    private transient Process jnlp;
-
-    /**
-     * Makes sure SECURITY-218 fix also applies to slaves.
+     * Makes sure SECURITY-218 fix also applies to agents.
      *
-     * This test is for regular dumb slave
+     * This test is for regular static agent
      */
     @Test
-    public void dumbSlave() throws Exception {
+    void dumbSlave() throws Exception {
         check(j.createOnlineSlave());
     }
 
     /**
-     * Makes sure SECURITY-218 fix also applies to slaves.
+     * Makes sure SECURITY-218 fix also applies to agents.
      *
-     * This test is for JNLP slave
+     * This test is for JNLP agent
      */
     @Test
-    public void jnlpSlave() throws Exception {
-        DumbSlave s = createJnlpSlave("test");
-        launchJnlpSlave(s);
-        check(s);
+    void jnlpSlave() throws Exception {
+        DumbSlave a = (DumbSlave) inboundAgents.createAgent(j, InboundAgentExtension.Options.newBuilder().build());
+        try {
+            j.createWebClient().goTo("computer/" + a.getNodeName() + "/jenkins-agent.jnlp?encrypt=true", "application/octet-stream");
+            check(a);
+        } finally {
+            inboundAgents.stop(j, a.getNodeName());
+        }
     }
 
     /**
-     * The attack scenario here is that a master sends a normal command to an agent and
-     * inserts a malicious response.
+     * The attack scenario here is that the controller sends a normal command to an agent and it
+     * returns a malicious response.
      */
     @SuppressWarnings("ConstantConditions")
-    private void check(DumbSlave s) throws Exception {
-        try {
-            Object o = s.getComputer().getChannel().call(new EvilReturnValue());
-            fail("Expected the connection to die: " + o);
-        } catch (Exception e) {
-            assertThat(e.getMessage(), containsString(MethodClosure.class.getName()));
-        }
+    private void check(DumbSlave s) {
+        IOException e = assertThrows(
+                IOException.class,
+                () -> s.getComputer().getChannel().call(new EvilReturnValue()),
+                "Expected the connection to die");
+        assertThat(e.getMessage(), containsString(MethodClosure.class.getName()));
     }
+
     private static class EvilReturnValue extends MasterToSlaveCallable<Object, RuntimeException> {
         @Override
         public Object call() {
             return new MethodClosure("oops", "trim");
         }
-    }
-
-// TODO: reconcile this duplicate with JnlpAccessWithSecuredHudsonTest
-    /**
-     * Creates a new agent that needs to be launched via JNLP.
-     *
-     * @see #launchJnlpSlave(Slave)
-     */
-    public DumbSlave createJnlpSlave(String name) throws Exception {
-        DumbSlave s = new DumbSlave(name, "", System.getProperty("java.io.tmpdir") + '/' + name, "2", Mode.NORMAL, "", new JNLPLauncher(true), RetentionStrategy.INSTANCE, Collections.EMPTY_LIST);
-        j.jenkins.addNode(s);
-        return s;
-    }
-
-// TODO: reconcile this duplicate with JnlpAccessWithSecuredHudsonTest
-    /**
-     * Launch a JNLP agent created by {@link #createJnlpSlave(String)}
-     */
-    public Channel launchJnlpSlave(Slave slave) throws Exception {
-        j.createWebClient().goTo("computer/"+slave.getNodeName()+"/slave-agent.jnlp?encrypt=true", "application/octet-stream");
-        String secret = slave.getComputer().getJnlpMac();
-        File slaveJar = tmp.newFile();
-        FileUtils.copyURLToFile(new Slave.JnlpJar("slave.jar").getURL(), slaveJar);
-        // To watch it fail: secret = secret.replace('1', '2');
-        ProcessBuilder pb = new ProcessBuilder(JavaEnvUtils.getJreExecutable("java"),
-                "-jar", slaveJar.getAbsolutePath(),
-                "-jnlpUrl", j.getURL() + "computer/"+slave.getNodeName()+"/slave-agent.jnlp", "-secret", secret);
-
-        pb.inheritIO();
-        System.err.println("Running: " + pb.command());
-
-        jnlp = pb.start();
-
-        for (int i = 0; i < /* one minute */600; i++) {
-            if (slave.getComputer().isOnline()) {
-                return slave.getComputer().getChannel();
-            }
-            Thread.sleep(100);
-        }
-
-        throw new AssertionError("The JNLP agent failed to connect");
-    }
-
-    @After
-    public void tearDown() {
-        if (jnlp !=null)
-            jnlp.destroy();
     }
 }

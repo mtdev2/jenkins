@@ -24,20 +24,21 @@
 
 package org.acegisecurity.userdetails;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.acegisecurity.GrantedAuthority;
 import org.acegisecurity.GrantedAuthorityImpl;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.instanceOf;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
 
 @SuppressWarnings("deprecation")
-public class UserDetailsTest {
+class UserDetailsTest {
 
     @Test
-    public void typePreserved() {
+    void typePreserved() {
         SpecialUserDetails sud = new SpecialUserDetailsImpl("bob", "s3cr3t", true, new GrantedAuthority[] {new GrantedAuthorityImpl("here")}, "bobstuff");
         org.springframework.security.core.userdetails.UserDetails sud2 = sud.toSpring();
         assertEquals("bob", sud2.getUsername());

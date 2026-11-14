@@ -24,14 +24,15 @@
 
 package org.acegisecurity;
 
-import hudson.security.SecurityRealm;
 import static org.junit.jupiter.api.Assertions.assertSame;
+
+import hudson.security.SecurityRealm;
 import org.junit.jupiter.api.Test;
 
-public class GrantedAuthorityTest {
+class GrantedAuthorityTest {
 
     @Test
-    public void authenticated() {
+    void authenticated() {
         assertSame(SecurityRealm.AUTHENTICATED_AUTHORITY2, GrantedAuthority.fromSpring(SecurityRealm.AUTHENTICATED_AUTHORITY2).toSpring());
         assertSame(SecurityRealm.AUTHENTICATED_AUTHORITY, GrantedAuthority.fromSpring(SecurityRealm.AUTHENTICATED_AUTHORITY.toSpring()));
     }

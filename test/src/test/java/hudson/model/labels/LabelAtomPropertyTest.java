@@ -21,28 +21,36 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model.labels;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class LabelAtomPropertyTest {
+@WithJenkins
+class LabelAtomPropertyTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     public static class LabelAtomPropertyImpl extends LabelAtomProperty {
         public final String abc;
 
+        @SuppressWarnings("checkstyle:redundantmodifier")
         @DataBoundConstructor
         public LabelAtomPropertyImpl(String abc) {
             this.abc = abc;
@@ -56,7 +64,7 @@ public class LabelAtomPropertyTest {
      * Tests the configuration persistence between disk, memory, and UI.
      */
     @Test
-    public void configRoundtrip() throws Exception {
+    void configRoundtrip() throws Exception {
         LabelAtom foo = j.jenkins.getLabelAtom("foo");
         LabelAtomPropertyImpl old = new LabelAtomPropertyImpl("value");
         foo.getProperties().add(old);
@@ -65,7 +73,7 @@ public class LabelAtomPropertyTest {
 
         // it should survive the configuration roundtrip
         j.submit(j.createWebClient().goTo("label/foo/configure").getFormByName("config"));
-        assertEquals(1,foo.getProperties().size());
+        assertEquals(1, foo.getProperties().size());
         j.assertEqualDataBoundBeans(old, foo.getProperties().get(LabelAtomPropertyImpl.class));
     }
 }

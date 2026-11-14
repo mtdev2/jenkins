@@ -24,44 +24,48 @@
 
 package hudson.security;
 
-import com.gargoylesoftware.htmlunit.Page;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import hudson.model.User;
-import jenkins.model.Jenkins;
-import jenkins.security.ApiTokenProperty;
-import jenkins.security.apitoken.TokenUuidAndPlainValue;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.MockAuthorizationStrategy;
-import org.kohsuke.stapler.Stapler;
-
-import javax.servlet.http.HttpSession;
-
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.Collection;
-import java.util.Collections;
-
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
+
+import hudson.model.User;
+import jakarta.servlet.http.HttpSession;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.Collections;
+import jenkins.model.Jenkins;
+import jenkins.security.ApiTokenProperty;
+import jenkins.security.apitoken.TokenUuidAndPlainValue;
+import org.htmlunit.Page;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.kohsuke.stapler.Stapler;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
-public class WhoAmITest {
+@WithJenkins
+class WhoAmITest {
 
-    @Rule
-    public final JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
     @Issue("SECURITY-1695")
-    public void whoAmI_regular_doesNotProvideSensitiveInformation() throws Exception {
+    void whoAmI_regular_doesNotProvideSensitiveInformation() throws Exception {
         j.jenkins.setSecurityRealm(new SecurityRealmImpl());
 
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -75,13 +79,13 @@ public class WhoAmITest {
         String content = whoAmIPage.getWebResponse().getContentAsString();
 
         String sessionId = wc.executeOnServer(() -> {
-            HttpSession session = Stapler.getCurrentRequest().getSession(false);
+            HttpSession session = Stapler.getCurrentRequest2().getSession(false);
             return session != null ? session.getId() : null;
         });
 
         assertThat(sessionId, not(nullValue()));
 
-        // dangerous stuff in Regular Login mode: 
+        // dangerous stuff in Regular Login mode:
         /*
          * <td>Details:</td>
          * <td>org.acegisecurity.ui.WebAuthenticationDetails@12afc: RemoteIpAddress: 127.0.0.1; SessionId: node0gbmv9ly0f3h517eppoupykq6n0</td>
@@ -102,7 +106,7 @@ public class WhoAmITest {
 
     @Test
     @Issue("SECURITY-1695")
-    public void whoAmI_regularApi_doesNotProvideSensitiveInformation() throws Exception {
+    void whoAmI_regularApi_doesNotProvideSensitiveInformation() throws Exception {
         j.jenkins.setSecurityRealm(new SecurityRealmImpl());
 
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -116,13 +120,13 @@ public class WhoAmITest {
         String content = whoAmIPage.getWebResponse().getContentAsString();
 
         String sessionId = wc.executeOnServer(() -> {
-            HttpSession session = Stapler.getCurrentRequest().getSession(false);
+            HttpSession session = Stapler.getCurrentRequest2().getSession(false);
             return session != null ? session.getId() : null;
         });
 
         assertThat(sessionId, not(nullValue()));
 
-        // dangerous stuff in Regular Login mode with the api/json call: 
+        // dangerous stuff in Regular Login mode with the api/json call:
         /*
          * {
          *    "_class": "hudson.security.WhoAmI",
@@ -131,7 +135,10 @@ public class WhoAmITest {
          *    "authorities": [],
          *    "details": "org.acegisecurity.ui.WebAuthenticationDetails@fffc7f0c: RemoteIpAddress: 127.0.0.1; SessionId: node0g4xbfaaq1qb91pwyv0ctilrfu0",
          *    "name": "user",
-         *    "toString": "org.acegisecurity.providers.UsernamePasswordAuthenticationToken@66074b8a: Username: [toString()=S3cr3t]; Password: [PROTECTED]; Authenticated: true; Details: org.acegisecurity.ui.WebAuthenticationDetails@fffc7f0c: RemoteIpAddress: 127.0.0.1; SessionId: node0g4xbfaaq1qb91pwyv0ctilrfu0; Granted Authorities: "
+         *    "toString": "org.acegisecurity.providers.UsernamePasswordAuthenticationToken@66074b8a:
+         *        Username: [toString()=S3cr3t]; Password: [PROTECTED]; Authenticated: true;
+         *        Details: org.acegisecurity.ui.WebAuthenticationDetails@fffc7f0c: RemoteIpAddress: 127.0.0.1; SessionId: node0g4xbfaaq1qb91pwyv0ctilrfu0;
+         *        Granted Authorities: "
          * }
          */
         assertThat(content, not(anyOf(
@@ -143,7 +150,7 @@ public class WhoAmITest {
 
     @Test
     @Issue("SECURITY-1697")
-    public void whoAmI_basic_doesNotProvideSensitiveInformation() throws Exception {
+    void whoAmI_basic_doesNotProvideSensitiveInformation() throws Exception {
         j.jenkins.setSecurityRealm(new SecurityRealmImpl());
 
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -155,7 +162,7 @@ public class WhoAmITest {
         HtmlPage whoAmIPage = wc.goTo("whoAmI");
         String content = whoAmIPage.getWebResponse().getContentAsString();
 
-        // dangerous stuff in Basic mode: 
+        // dangerous stuff in Basic mode:
         /*
          * <td>toString:</td>
          * <td>org.acegisecurity.providers.UsernamePasswordAuthenticationToken@e8fd00a7: Username: [toString()=S3cr3t];
@@ -173,7 +180,7 @@ public class WhoAmITest {
 
     @Test
     @Issue("SECURITY-1697")
-    public void whoAmI_apiToken_doesNotProvideSensitiveInformation() throws Exception {
+    void whoAmI_apiToken_doesNotProvideSensitiveInformation() throws Exception {
         j.jenkins.setSecurityRealm(new SecurityRealmImpl());
 
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy()
@@ -190,7 +197,7 @@ public class WhoAmITest {
         HtmlPage whoAmIPage = wc.goTo("whoAmI");
         String content = whoAmIPage.getWebResponse().getContentAsString();
 
-        // dangerous stuff in API Token mode: 
+        // dangerous stuff in API Token mode:
         /*
          * <td rowspan="1">Authorization</td>
          * <td>Basic dXNlcjoxMTRiNGRmMWNhZTVkNDQ2MjgxZTJkZWEzMDY1NTEyZDBi</td>

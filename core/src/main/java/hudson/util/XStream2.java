@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2010, Sun Microsystems, Inc., Kohsuke Kawaguchi, Alan Harder
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,52 +21,67 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.thoughtworks.xstream.XStream;
-import com.thoughtworks.xstream.io.xml.KXml2Driver;
-import com.thoughtworks.xstream.mapper.Mapper;
-import com.thoughtworks.xstream.mapper.MapperWrapper;
+import com.thoughtworks.xstream.XStreamException;
 import com.thoughtworks.xstream.converters.ConversionException;
 import com.thoughtworks.xstream.converters.Converter;
+import com.thoughtworks.xstream.converters.ConverterLookup;
 import com.thoughtworks.xstream.converters.ConverterMatcher;
+import com.thoughtworks.xstream.converters.ConverterRegistry;
 import com.thoughtworks.xstream.converters.DataHolder;
 import com.thoughtworks.xstream.converters.MarshallingContext;
 import com.thoughtworks.xstream.converters.SingleValueConverter;
 import com.thoughtworks.xstream.converters.SingleValueConverterWrapper;
 import com.thoughtworks.xstream.converters.UnmarshallingContext;
 import com.thoughtworks.xstream.converters.extended.DynamicProxyConverter;
+import com.thoughtworks.xstream.converters.reflection.ReflectionProvider;
 import com.thoughtworks.xstream.core.ClassLoaderReference;
 import com.thoughtworks.xstream.core.JVM;
+import com.thoughtworks.xstream.core.ReferenceByXPathMarshallingStrategy;
+import com.thoughtworks.xstream.core.ReferenceByXPathUnmarshaller;
+import com.thoughtworks.xstream.core.TreeUnmarshaller;
 import com.thoughtworks.xstream.core.util.Fields;
 import com.thoughtworks.xstream.io.HierarchicalStreamDriver;
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 import com.thoughtworks.xstream.io.ReaderWrapper;
+import com.thoughtworks.xstream.io.xml.StandardStaxDriver;
 import com.thoughtworks.xstream.mapper.CannotResolveClassException;
+import com.thoughtworks.xstream.mapper.Mapper;
+import com.thoughtworks.xstream.mapper.MapperWrapper;
 import com.thoughtworks.xstream.security.AnyTypePermission;
+import com.thoughtworks.xstream.security.ForbiddenClassException;
+import com.thoughtworks.xstream.security.InterfaceTypePermission;
+import com.thoughtworks.xstream.security.NoTypePermission;
+import com.thoughtworks.xstream.security.NullPermission;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.PluginManager;
 import hudson.PluginWrapper;
 import hudson.XmlFile;
 import hudson.diagnosis.OldDataMonitor;
-import hudson.remoting.ClassFilter;
-import hudson.util.xstream.ImmutableSetConverter;
-import hudson.util.xstream.ImmutableSortedSetConverter;
-import jenkins.util.xstream.SafeURLConverter;
-import jenkins.model.Jenkins;
+import hudson.model.JobProperty;
 import hudson.model.Label;
+import hudson.model.Node;
+import hudson.model.PersistenceRoot;
 import hudson.model.Result;
 import hudson.model.Saveable;
+import hudson.remoting.ClassFilter;
 import hudson.util.xstream.ImmutableListConverter;
 import hudson.util.xstream.ImmutableMapConverter;
+import hudson.util.xstream.ImmutableSetConverter;
+import hudson.util.xstream.ImmutableSortedSetConverter;
 import hudson.util.xstream.MapperDelegate;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
-
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -77,9 +92,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLOutputFactory;
+import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
+import jenkins.util.xstream.CriticalXStreamException;
+import jenkins.util.xstream.SafeURLConverter;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * {@link XStream} customized in various ways for Jenkins’ needs.
@@ -89,10 +109,39 @@ public class XStream2 extends XStream {
 
     private static final Logger LOGGER = Logger.getLogger(XStream2.class.getName());
 
+    @Restricted(NoExternalUse.class)
+    static /* non-final for tests */ boolean DISABLE_PERSISTENCE_ROOT_GUARDING_UNMARSHALLING_STRATEGY = SystemProperties.getBoolean(XStream2.class.getName() + ".DISABLE_PERSISTENCE_ROOT_GUARDING_UNMARSHALLING_STRATEGY");
+
+    /**
+     * Determine what is the value (in seconds) of the "collectionUpdateLimit" added by XStream
+     * to protect against <a href="http://x-stream.github.io/CVE-2021-43859.html">CVE-2021-43859</a>.
+     * It corresponds to the accumulated timeout when adding an item to a collection.
+     *
+     * Default: 5 seconds (in contrary to XStream default to 20 which is a bit too tolerant)
+     * If negative: disable the DoS protection
+     */
+    @Restricted(NoExternalUse.class)
+    public static final String COLLECTION_UPDATE_LIMIT_PROPERTY_NAME = XStream2.class.getName() + ".collectionUpdateLimit";
+    private static final int COLLECTION_UPDATE_LIMIT_DEFAULT_VALUE = 5;
+
+    /**
+     * Escape hatch: set {@code hudson.util.XStream2.SUPPRESS_TYPE_PERMISSION=true} to restore the
+     * pre-SECURITY-4125 behaviour of allowing all types through XStream's TypePermission layer.
+     * The {@link RobustReflectionConverter} {@code resolves-to} check introduced by SECURITY-4125
+     * remains active regardless of this flag and provides a second layer of defence.
+     *
+     * <p>This flag is evaluated once at {@code XStream2} construction time; changing the system
+     * property after the JVM has started has no effect on existing instances (including
+     * {@code Jenkins.XSTREAM2}).  A full restart is required for this escape hatch to take effect.
+     */
+    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @Restricted(NoExternalUse.class)
+    public static /* non-final for tests */ boolean SUPPRESS_TYPE_PERMISSION = SystemProperties.getBoolean(XStream2.class.getName() + ".SUPPRESS_TYPE_PERMISSION");
+
     private RobustReflectionConverter reflectionConverter;
     private final ThreadLocal<Boolean> oldData = new ThreadLocal<>();
     private final @CheckForNull ClassOwnership classOwnership;
-    private final Map<String,Class<?>> compatibilityAliases = new ConcurrentHashMap<>();
+    private final Map<String, Class<?>> compatibilityAliases = new ConcurrentHashMap<>();
 
     /**
      * Hook to insert {@link Mapper}s after they are created.
@@ -106,7 +155,41 @@ public class XStream2 extends XStream {
      * @return a new instance of the HierarchicalStreamDriver we want to use
      */
     public static HierarchicalStreamDriver getDefaultDriver() {
-        return new KXml2Driver();
+        return new StaxDriver();
+    }
+
+    private static class StaxDriver extends StandardStaxDriver {
+        /*
+         * The below two methods are copied from com.thoughtworks.xstream.io.xml.AbstractXppDriver to preserve
+         * compatibility.
+         */
+
+        @Override
+        public HierarchicalStreamWriter createWriter(Writer out) {
+            return new PrettyPrintWriter(out, PrettyPrintWriter.XML_1_1, getNameCoder());
+        }
+
+        @Override
+        public HierarchicalStreamWriter createWriter(OutputStream out) {
+            return createWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8));
+        }
+
+        /*
+         * The below two methods are copied from com.thoughtworks.xstream.io.xml.StaxDriver for Java 17 compatibility.
+         */
+
+        @Override
+        protected XMLInputFactory createInputFactory() {
+            final XMLInputFactory instance = XMLInputFactory.newInstance();
+            instance.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, false);
+            instance.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false);
+            return instance;
+        }
+
+        @Override
+        protected XMLOutputFactory createOutputFactory() {
+            return XMLOutputFactory.newInstance();
+        }
     }
 
     public XStream2() {
@@ -117,6 +200,17 @@ public class XStream2 extends XStream {
 
     public XStream2(HierarchicalStreamDriver hierarchicalStreamDriver) {
         super(hierarchicalStreamDriver);
+        init();
+        classOwnership = null;
+    }
+
+    /**
+     * @since 2.318
+     */
+    public XStream2(ReflectionProvider reflectionProvider, HierarchicalStreamDriver driver,
+                    ClassLoaderReference classLoaderReference, Mapper mapper, ConverterLookup converterLookup,
+                    ConverterRegistry converterRegistry) {
+        super(reflectionProvider, driver, classLoaderReference, mapper, converterLookup, converterRegistry);
         init();
         classOwnership = null;
     }
@@ -145,14 +239,14 @@ public class XStream2 extends XStream {
      * @param nullOut whether to perform this special behavior;
      *                false to use the stock XStream behavior of leaving unmentioned {@code root} fields untouched
      * @see XmlFile#unmarshalNullingOut
-     * @see <a href="https://issues.jenkins-ci.org/browse/JENKINS-21017">JENKINS-21017</a>
+     * @see <a href="https://issues.jenkins.io/browse/JENKINS-21017">JENKINS-21017</a>
      * @since 2.99
      */
     public Object unmarshal(HierarchicalStreamReader reader, Object root, DataHolder dataHolder, boolean nullOut) {
         // init() is too early to do this
         // defensive because some use of XStream happens before plugins are initialized.
         Jenkins h = Jenkins.getInstanceOrNull();
-        if(h!=null && h.pluginManager!=null && h.pluginManager.uberClassLoader!=null) {
+        if (h != null && h.pluginManager != null && h.pluginManager.uberClassLoader != null) {
             setClassLoader(h.pluginManager.uberClassLoader);
         }
 
@@ -170,6 +264,7 @@ public class XStream2 extends XStream {
                     }
                     super.moveUp();
                 }
+
                 @Override
                 public void moveDown() {
                     try {
@@ -204,9 +299,9 @@ public class XStream2 extends XStream {
             }
         }
 
-        if (oldData.get()!=null) {
+        if (oldData.get() != null) {
             oldData.remove();
-            if (o instanceof Saveable) OldDataMonitor.report((Saveable)o, "1.106");
+            if (o instanceof Saveable) OldDataMonitor.report((Saveable) o, "1.106");
         }
         return o;
     }
@@ -216,6 +311,7 @@ public class XStream2 extends XStream {
         super.setupConverters();
         // replace default reflection converter
         reflectionConverter = new RobustReflectionConverter(getMapper(), JVM.newReflectionProvider(), new PluginClassOwnership());
+        reflectionConverter.setConverterLookup(getConverterLookup());
         registerConverter(reflectionConverter, PRIORITY_VERY_LOW + 1);
     }
 
@@ -235,35 +331,58 @@ public class XStream2 extends XStream {
     }
 
     private void init() {
+        int updateLimit = SystemProperties.getInteger(COLLECTION_UPDATE_LIMIT_PROPERTY_NAME, COLLECTION_UPDATE_LIMIT_DEFAULT_VALUE);
+        this.setCollectionUpdateLimit(updateLimit);
+
         // list up types that should be marshalled out like a value, without referential integrity tracking.
         addImmutableType(Result.class, false);
 
         // http://www.openwall.com/lists/oss-security/2017/04/03/4
         denyTypes(new Class[] { void.class, Void.class });
 
-        registerConverter(new RobustCollectionConverter(getMapper(),getReflectionProvider()),10);
+        if (!DISABLE_PERSISTENCE_ROOT_GUARDING_UNMARSHALLING_STRATEGY) {
+            setMarshallingStrategy(new PersistenceRootGuardingMarshallingStrategy());
+        }
+
+        registerConverter(new RobustCollectionConverter(getMapper(), getReflectionProvider()), 10);
         registerConverter(new RobustMapConverter(getMapper()), 10);
-        registerConverter(new ImmutableMapConverter(getMapper(),getReflectionProvider()),10);
-        registerConverter(new ImmutableSortedSetConverter(getMapper(),getReflectionProvider()),10);
-        registerConverter(new ImmutableSetConverter(getMapper(),getReflectionProvider()),10);
-        registerConverter(new ImmutableListConverter(getMapper(),getReflectionProvider()),10);
-        registerConverter(new CopyOnWriteMap.Tree.ConverterImpl(getMapper()),10); // needs to override MapConverter
-        registerConverter(new DescribableList.ConverterImpl(getMapper()),10); // explicitly added to handle subtypes
-        registerConverter(new Label.ConverterImpl(),10);
+        registerConverter(new ImmutableMapConverter(getMapper(), getReflectionProvider()), 10);
+        registerConverter(new ImmutableSortedSetConverter(getMapper(), getReflectionProvider()), 10);
+        registerConverter(new ImmutableSetConverter(getMapper(), getReflectionProvider()), 10);
+        registerConverter(new ImmutableListConverter(getMapper(), getReflectionProvider()), 10);
+        registerConverter(new CopyOnWriteMap.Tree.ConverterImpl(getMapper()), 10); // needs to override MapConverter
+        registerConverter(new DescribableList.ConverterImpl(getMapper()), 10); // explicitly added to handle subtypes
+        registerConverter(new Label.ConverterImpl(), 10);
         // SECURITY-637 against URL deserialization
-        registerConverter(new SafeURLConverter(),10); 
+        registerConverter(new SafeURLConverter(), 10);
 
         // this should come after all the XStream's default simpler converters,
         // but before reflection-based one kicks in.
         registerConverter(new AssociatedConverterImpl(this), -10);
 
         registerConverter(new BlacklistedTypesConverter(), PRIORITY_VERY_HIGH); // SECURITY-247 defense
-        addPermission(AnyTypePermission.ANY); // covered by JEP-200, avoid securityWarningGiven
+        if (SUPPRESS_TYPE_PERMISSION) {
+            addPermission(AnyTypePermission.ANY); // covered by JEP-200, avoid securityWarningGiven
+        } else {
+            addPermission(NoTypePermission.NONE);
+            addPermission(type -> {
+                // TODO What about abstract classes?
+                String typeName = type.getName();
+                if (ClassFilter.DEFAULT.isBlacklisted(typeName) || ClassFilter.DEFAULT.isBlacklisted(type)) {
+                    throw new CriticalXStreamException(new ForbiddenClassException(type));
+                }
+                // Allow anything allowed by ClassFilter, we still apply Converter-based restrictions
+                return true;
+            });
+            addPermission(NullPermission.NULL);
+            addPermission(InterfaceTypePermission.INTERFACES);
+        }
 
         registerConverter(new DynamicProxyConverter(getMapper(), new ClassLoaderReference(getClassLoader())) { // SECURITY-105 defense
             @Override public boolean canConvert(Class type) {
                 return /* this precedes NullConverter */ type != null && super.canConvert(type);
             }
+
             @Override public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
                 throw new ConversionException("<dynamic-proxy> not supported");
             }
@@ -294,7 +413,7 @@ public class XStream2 extends XStream {
     }
 
     /**
-     * @deprecated Uses default encoding yet fails to write an encoding header. Prefer {@link #toXMLUTF8}.
+     * @deprecated Uses UTF-8 (default encoding) yet fails to write an encoding header. Prefer {@link #toXMLUTF8}.
      */
     @Deprecated
     @Override public void toXML(Object obj, OutputStream out) {
@@ -354,14 +473,14 @@ public class XStream2 extends XStream {
      * @since 1.416
      */
     public void addCompatibilityAlias(String oldClassName, Class newClass) {
-        compatibilityAliases.put(oldClassName,newClass);
+        compatibilityAliases.put(oldClassName, newClass);
     }
 
     /**
      * Prior to Hudson 1.106, XStream 1.1.x was used which encoded "$" in class names
      * as "-" instead of "_-" that is used now.  Up through Hudson 1.348 compatibility
      * for old serialized data was maintained via {@link com.thoughtworks.xstream.mapper.XStream11XmlFriendlyMapper}.
-     * However, it was found (HUDSON-5768) that this caused fields with "__" to fail
+     * However, it was found (JENKINS-5768) that this caused fields with "__" to fail
      * deserialization due to double decoding.  Now this class is used for compatibility.
      */
     private class CompatibilityMapper extends MapperWrapper {
@@ -372,7 +491,7 @@ public class XStream2 extends XStream {
         @Override
         public Class realClass(String elementName) {
             Class s = compatibilityAliases.get(elementName);
-            if (s!=null)    return s;
+            if (s != null)    return s;
 
             try {
                 return super.realClass(elementName);
@@ -395,7 +514,13 @@ public class XStream2 extends XStream {
      */
     private static final class AssociatedConverterImpl implements Converter {
         private final XStream xstream;
-        private final ConcurrentHashMap<Class<?>,Converter> cache =
+        private static final ClassValue<Class<? extends ConverterMatcher>> classCache = new ClassValue<>() {
+            @Override
+            protected Class<? extends ConverterMatcher> computeValue(Class<?> type) {
+                return computeConverterClass(type);
+            }
+        };
+        private final ConcurrentHashMap<Class<?>, Converter> cache =
                 new ConcurrentHashMap<>();
 
         private AssociatedConverterImpl(XStream xstream) {
@@ -407,39 +532,53 @@ public class XStream2 extends XStream {
             if (t == null) {
                 return null;
             }
-            
-            Converter result = cache.get(t);
-            if (result != null)
-                // ConcurrentHashMap does not allow null, so use this object to represent null
-                return result == this ? null : result;
+            Converter result = cache.computeIfAbsent(t, unused -> computeConverter(t));
+            // ConcurrentHashMap does not allow null, so use this object to represent null
+            return result == this ? null : result;
+        }
+
+        @CheckForNull
+        private static Class<? extends ConverterMatcher> computeConverterClass(@NonNull Class<?> t) {
             try {
                 final ClassLoader classLoader = t.getClassLoader();
-                if(classLoader == null) {
+                if (classLoader == null) {
                     return null;
                 }
-                Class<?> cl = classLoader.loadClass(t.getName() + "$ConverterImpl");
+                String name = t.getName() + "$ConverterImpl";
+                if (classLoader.getResource(name.replace('.', '/') + ".class") == null) {
+                    return null;
+                }
+                return classLoader.loadClass(name).asSubclass(ConverterMatcher.class);
+            } catch (ClassNotFoundException e) {
+                return null;
+            }
+        }
+
+        @CheckForNull
+        private Converter computeConverter(@NonNull Class<?> t) {
+            Class<? extends ConverterMatcher> cl = classCache.get(t);
+            if (cl == null) {
+                // See above.. this object in cache represents null
+                return this;
+            }
+            try {
                 Constructor<?> c = cl.getConstructors()[0];
 
                 Class<?>[] p = c.getParameterTypes();
                 Object[] args = new Object[p.length];
                 for (int i = 0; i < p.length; i++) {
-                    if(p[i]==XStream.class || p[i]==XStream2.class)
+                    if (p[i] == XStream.class || p[i] == XStream2.class)
                         args[i] = xstream;
-                    else if(p[i]== Mapper.class)
+                    else if (p[i] == Mapper.class)
                         args[i] = xstream.getMapper();
                     else
-                        throw new InstantiationError("Unrecognized constructor parameter: "+p[i]);
+                        throw new InstantiationError("Unrecognized constructor parameter: " + p[i]);
 
                 }
-                ConverterMatcher cm = (ConverterMatcher)c.newInstance(args);
-                result = cm instanceof SingleValueConverter
-                        ? new SingleValueConverterWrapper((SingleValueConverter)cm)
-                        : (Converter)cm;
-                cache.put(t, result);
-                return result;
-            } catch (ClassNotFoundException e) {
-                cache.put(t, this);  // See above.. this object in cache represents null
-                return null;
+                ConverterMatcher cm = (ConverterMatcher) c.newInstance(args);
+                return cm instanceof SingleValueConverter
+                        ? new SingleValueConverterWrapper((SingleValueConverter) cm)
+                        : (Converter) cm;
             } catch (IllegalAccessException e) {
                 IllegalAccessError x = new IllegalAccessError();
                 x.initCause(e);
@@ -451,16 +590,21 @@ public class XStream2 extends XStream {
             }
         }
 
+        @Override
         public boolean canConvert(Class type) {
-            return findConverter(type)!=null;
+            return findConverter(type) != null;
         }
 
+        @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "TODO needs triage")
+        @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
-            findConverter(source.getClass()).marshal(source,writer,context);
+            findConverter(source.getClass()).marshal(source, writer, context);
         }
 
+        @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "TODO needs triage")
+        @Override
         public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
-            return findConverter(context.getRequiredType()).unmarshal(reader,context);
+            return findConverter(context.getRequiredType()).unmarshal(reader, context);
         }
     }
 
@@ -476,22 +620,25 @@ public class XStream2 extends XStream {
     public abstract static class PassthruConverter<T> implements Converter {
         private Converter converter;
 
-        public PassthruConverter(XStream2 xstream) {
+        protected PassthruConverter(XStream2 xstream) {
             converter = xstream.reflectionConverter;
         }
 
+        @Override
         public boolean canConvert(Class type) {
             // marshal/unmarshal called directly from AssociatedConverterImpl
             return false;
         }
 
+        @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
             converter.marshal(source, writer, context);
         }
 
+        @Override
         public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
             Object obj = converter.unmarshal(reader, context);
-            callback((T)obj, context);
+            callback((T) obj, context);
             return obj;
         }
 
@@ -509,7 +656,7 @@ public class XStream2 extends XStream {
          */
         @CheckForNull String ownerOf(Class<?> clazz);
     }
-    
+
     class PluginClassOwnership implements ClassOwnership {
 
         private PluginManager pm;
@@ -537,16 +684,13 @@ public class XStream2 extends XStream {
     private static class BlacklistedTypesConverter implements Converter {
         @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
-            throw new UnsupportedOperationException("Refusing to marshal " + source.getClass().getName() + " for security reasons; see https://jenkins.io/redirect/class-filter/");
+            throw new UnsupportedOperationException("Refusing to marshal " + source.getClass().getName() + " for security reasons; see https://www.jenkins.io/redirect/class-filter/");
         }
 
         @Override
         public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
-            throw new ConversionException("Refusing to unmarshal " + reader.getNodeName() + " for security reasons; see https://jenkins.io/redirect/class-filter/");
+            throw new ConversionException("Refusing to unmarshal " + reader.getNodeName() + " for security reasons; see https://www.jenkins.io/redirect/class-filter/");
         }
-
-        /** TODO see comment in {@code whitelisted-classes.txt} */
-        private static final Pattern JRUBY_PROXY = Pattern.compile("org[.]jruby[.]proxy[.].+[$]Proxy\\d+");
 
         @Override
         public boolean canConvert(Class type) {
@@ -554,11 +698,82 @@ public class XStream2 extends XStream {
                 return false;
             }
             String name = type.getName();
-            if (JRUBY_PROXY.matcher(name).matches()) {
-                return false;
-            }
             // claim we can convert all the scary stuff so we can throw exceptions when attempting to do so
             return ClassFilter.DEFAULT.isBlacklisted(name) || ClassFilter.DEFAULT.isBlacklisted(type);
+        }
+    }
+
+    /**
+     * The stock XStream marshalling strategy, except that its unmarshaller refuses to construct a
+     * {@link PersistenceRoot} subtype anywhere but at the document root.
+     * See also {@code hudson.util.RobustReflectionConverter#isSafePersistenceRootReference(com.thoughtworks.xstream.io.HierarchicalStreamReader, Class)}.
+     */
+    private static final class PersistenceRootGuardingMarshallingStrategy extends ReferenceByXPathMarshallingStrategy {
+        PersistenceRootGuardingMarshallingStrategy() {
+            super(RELATIVE);
+        }
+
+        @Override
+        protected TreeUnmarshaller createUnmarshallingContext(Object root, HierarchicalStreamReader reader, ConverterLookup converterLookup, Mapper mapper) {
+            return new ReferenceByXPathUnmarshaller(root, reader, converterLookup, mapper) {
+                private int depth;
+
+                @Override
+                protected Object convert(Object parent, Class type, Converter converter) {
+                    if (depth > 0) {
+                        // Cf. RobustReflectionConverter#instantiateNewInstance
+                        Class effectiveType = resolvedType(type);
+                        if (effectiveType != null && PersistenceRoot.class.isAssignableFrom(effectiveType)
+                                // JobProperty as a workaround for promoted-builds plugin's `JobPropertyImpl` being both
+                                && !JobProperty.class.isAssignableFrom(effectiveType) && !isSafePersistenceRootReference(effectiveType, converter)) {
+                            final String msg = "Refusing to unmarshal PersistenceRoot subtype '" + effectiveType.getName() + "' nested in '"
+                                    + getRequiredType().getName() + "' as element '" + reader.getNodeName()
+                                    + "'. PersistenceRoot objects are document roots and must not appear as nested values.";
+                            LOGGER.log(Level.WARNING, msg);
+                            throw new CriticalXStreamException(new XStreamException(msg));
+                        }
+                    }
+                    depth++;
+                    try {
+                        return super.convert(parent, type, converter);
+                    } finally {
+                        depth--;
+                    }
+                }
+
+                private Class resolvedType(Class type) {
+                    String resolvesToAttr = reader.getAttribute(getMapper().aliasForSystemAttribute("resolves-to"));
+                    if (resolvesToAttr != null) {
+                        try {
+                            return getMapper().realClass(resolvesToAttr);
+                        } catch (Exception ignored) {
+                            // unresolvable class name — not a PersistenceRoot
+                        }
+                    }
+                    return type;
+                }
+
+                private boolean isSafePersistenceRootReference(Class type, Converter converter) {
+                    if (reader.getAttribute(getMapper().aliasForSystemAttribute("reference")) != null) {
+                        return true;
+                    }
+                    if (converter instanceof SingleValueConverter) {
+                        return true;
+                    }
+                    String resolvesTo = reader.getAttribute(getMapper().aliasForSystemAttribute("resolves-to"));
+                    if (resolvesTo != null) {
+                        try {
+                            return !PersistenceRoot.class.isAssignableFrom(getMapper().realClass(resolvesTo));
+                        } catch (Exception e) {
+                            return false;
+                        }
+                    }
+                    // legacy Jenkins#slaves inlined in the root config.xml, migrated to Nodes right after Jenkins#load;
+                    // that is the only unmarshalling into the Jenkins singleton, so this is not reachable from user input
+                    // TODO Remove support for this
+                    return root instanceof Jenkins && Node.class.isAssignableFrom(type);
+                }
+            };
         }
     }
 }

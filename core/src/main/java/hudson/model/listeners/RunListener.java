@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi, Tom Huybrechts
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,18 +21,21 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model.listeners;
 
-import hudson.ExtensionPoint;
-import hudson.ExtensionListView;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.ExtensionList;
+import hudson.ExtensionListView;
+import hudson.ExtensionPoint;
 import hudson.FilePath;
 import hudson.Functions;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
 import hudson.model.Environment;
+import hudson.model.Job;
 import hudson.model.JobProperty;
 import hudson.model.Run;
 import hudson.model.Run.RunnerAbortedException;
@@ -40,15 +43,16 @@ import hudson.model.TaskListener;
 import hudson.scm.SCM;
 import hudson.tasks.BuildWrapper;
 import hudson.util.CopyOnWriteList;
-import org.jvnet.tiger_types.Types;
-
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.function.IntPredicate;
+import jenkins.model.lazy.AbstractLazyLoadRunMap;
+import jenkins.util.Listeners;
+import org.jvnet.tiger_types.Types;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.Beta;
 
 /**
  * Receives notifications about builds.
@@ -59,7 +63,7 @@ import edu.umd.cs.findbugs.annotations.NonNull;
  *
  * <p>
  * This is an abstract class so that methods added in the future won't break existing listeners.
- * 
+ *
  * @author Kohsuke Kawaguchi
  * @since 1.145
  */
@@ -73,9 +77,9 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
     protected RunListener() {
         Type type = Types.getBaseClass(getClass(), RunListener.class);
         if (type instanceof ParameterizedType)
-            targetType = Types.erasure(Types.getTypeArgument(type,0));
+            targetType = Types.erasure(Types.getTypeArgument(type, 0));
         else
-            throw new IllegalStateException(getClass()+" uses the raw type for extending RunListener");
+            throw new IllegalStateException(getClass() + " uses the raw type for extending RunListener");
     }
 
     /**
@@ -158,8 +162,8 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      *      to suppress a stack trace by the receiver.
      * @since 1.410
      */
-    public Environment setUpEnvironment( AbstractBuild build, Launcher launcher, BuildListener listener ) throws IOException, InterruptedException, RunnerAbortedException {
-    	return new Environment() {};
+    public Environment setUpEnvironment(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException, RunnerAbortedException {
+        return new Environment() {};
     }
 
     /**
@@ -171,6 +175,28 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      *      from breaking all the builds.
      */
     public void onDeleted(R r) {}
+
+    /**
+     * Allows listeners to veto build loading.
+     * @param job the job from which a build might be loaded
+     * @param buildNumber the proposed build number
+     * @return false to veto build loading
+     * @see AbstractLazyLoadRunMap#recognizeNumber
+     */
+    @Restricted(Beta.class)
+    public boolean allowLoad(@NonNull Job<?, ?> job, int buildNumber) {
+        return true;
+    }
+
+    /**
+     * Allows listeners to veto build loading during startup.
+     * Same behavior as {@link #allowLoad} but permits an implementation to more
+     * efficiently respond to numerous queries about historical build numbers.
+     */
+    @Restricted(Beta.class)
+    public IntPredicate createLoadAllower(@NonNull Job<?, ?> job) {
+        return buildNumber -> allowLoad(job, buildNumber);
+    }
 
     /**
      * Registers this object as an active listener so that it can start getting
@@ -203,28 +229,22 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      * Fires the {@link #onCompleted(Run, TaskListener)} event.
      */
     public static void fireCompleted(Run r, @NonNull TaskListener listener) {
-        for (RunListener l : all()) {
-            if(l.targetType.isInstance(r))
-                try {
-                    l.onCompleted(r,listener);
-                } catch (Throwable e) {
-                    report(e);
-                }
-        }
+        Listeners.notify(RunListener.class, true, l -> {
+            if (l.targetType.isInstance(r)) {
+                l.onCompleted(r, listener);
+            }
+        });
     }
 
     /**
      * Fires the {@link #onInitialize(Run)} event.
      */
     public static void fireInitialize(Run r) {
-        for (RunListener l : all()) {
-            if(l.targetType.isInstance(r))
-                try {
-                    l.onInitialize(r);
-                } catch (Throwable e) {
-                    report(e);
-                }
-        }
+        Listeners.notify(RunListener.class, true, l -> {
+            if (l.targetType.isInstance(r)) {
+                l.onInitialize(r);
+            }
+        });
     }
 
 
@@ -232,14 +252,11 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      * Fires the {@link #onStarted(Run, TaskListener)} event.
      */
     public static void fireStarted(Run r, TaskListener listener) {
-        for (RunListener l : all()) {
-            if(l.targetType.isInstance(r))
-                try {
-                    l.onStarted(r,listener);
-                } catch (Throwable e) {
-                    report(e);
-                }
-        }
+        Listeners.notify(RunListener.class, true, l -> {
+            if (l.targetType.isInstance(r)) {
+                l.onStarted(r, listener);
+            }
+        });
     }
 
     /**
@@ -249,28 +266,22 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
         if (!Functions.isExtensionsAvailable()) {
             return;
         }
-        for (RunListener l : all()) {
-            if(l.targetType.isInstance(r))
-                try {
-                    l.onFinalized(r);
-                } catch (Throwable e) {
-                    report(e);
-                }
-        }
+        Listeners.notify(RunListener.class, true, l -> {
+            if (l.targetType.isInstance(r)) {
+                l.onFinalized(r);
+            }
+        });
     }
 
     /**
      * Fires the {@link #onDeleted} event.
      */
     public static void fireDeleted(Run r) {
-        for (RunListener l : all()) {
-            if(l.targetType.isInstance(r))
-                try {
-                    l.onDeleted(r);
-                } catch (Throwable e) {
-                    report(e);
-                }
-        }
+        Listeners.notify(RunListener.class, true, l -> {
+            if (l.targetType.isInstance(r)) {
+                l.onDeleted(r);
+            }
+        });
     }
 
     /**
@@ -279,11 +290,4 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
     public static ExtensionList<RunListener> all() {
         return ExtensionList.lookup(RunListener.class);
     }
-
-    private static void report(Throwable e) {
-        LOGGER.log(Level.WARNING, "RunListener failed",e);
-    }
-
-    private static final Logger LOGGER = Logger.getLogger(RunListener.class.getName());
-
 }

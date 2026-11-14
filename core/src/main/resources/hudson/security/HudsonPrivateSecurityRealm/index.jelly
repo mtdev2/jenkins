@@ -23,34 +23,71 @@ THE SOFTWARE.
 -->
 
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:l="/lib/layout">
-  <l:layout permission="${app.ADMINISTER}" title="${%Users}">
-    <st:include page="sidepanel.jelly" />
-    <l:main-panel>
-      <h1>${%Users}</h1>
-      <p>${%blurb}</p>
-      
-      <table class="sortable pane bigtable" id="people">
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+  <j:set var="header">
+    <l:view>
+      <l:app-bar title="${%Users}" subtitle="${it.allUsers.size()}">
+        <l:isAdmin>
+          <button class="jenkins-button jenkins-button--primary"
+                  data-type="dialog-opener"
+                  data-dialog-url="addUserDialog">
+            <l:icon src="symbol-add" />
+            ${%Create User}
+          </button>
+        </l:isAdmin>
+      </l:app-bar>
+    </l:view>
+  </j:set>
+
+  <l:settings-subpage header="${header}" permission="${app.ADMINISTER}">
+    <table class="jenkins-table sortable" id="people">
+      <thead>
         <tr>
-          <th class="minimum-width" data-sort-disable="true" />
-          <th>${%User ID}</th>
-          <th>${%Name}</th>
-          <th class="minimum-width" data-sort-disable="true" />
+          <th class="jenkins-table__cell--tight" data-sort-disable="true" />
+          <th initialSortDir="down">${%Username}</th>
+          <th>${%Full name}</th>
+          <th class="jenkins-table__cell--tight" data-sort-disable="true" />
+          <th class="jenkins-table__cell--tight" data-sort-disable="true" />
         </tr>
+      </thead>
+      <tbody>
         <j:forEach var="user" items="${it.allUsers}">
           <tr>
-            <td><a href="${user.url}/" class="model-link inside"><img src="${h.getUserAvatar(user,'32x32')}" alt="" height="32" width="32" /></a></td>
-            <td><a href="${user.url}/">${user.id}</a></td>
-            <td><a href="${user.url}/">${user}</a></td>
+            <td class="jenkins-table__cell--tight jenkins-table__icon">
+              <div class="jenkins-table__cell__button-wrapper">
+                <l:icon src="${h.getUserAvatar(user, '64x64')}" class="jenkins-avatar" />
+              </div>
+            </td>
             <td>
-              <a href="${user.url}/configure"><l:icon class="icon-gear2 icon-lg" /></a>
+              <a href="${user.url}/">${user.id}</a>
+            </td>
+            <td>
+              ${user.fullName}
+            </td>
+            <td>
+              <div class="jenkins-table__cell__button-wrapper">
+                <a href="${user.url}/account" class="jenkins-button jenkins-button--tertiary">
+                  <l:icon src="symbol-settings" />
+                </a>
+              </div>
+            </td>
+            <td>
               <j:if test="${user.canDelete()}">
-                <a href="${user.url}/delete"><l:icon class="icon-edit-delete icon-md" /></a>
+                <div class="jenkins-table__cell__button-wrapper">
+                  <l:confirmationLink href="${user.url}/doDelete"
+                                      class="jenkins-button jenkins-button--tertiary jenkins-!-destructive-color"
+                                      post="true"
+                                      title="${%delete.user(user.displayName)}"
+                                      okText="${%Delete}"
+                                      destructive="true">
+                    <l:icon src="symbol-trash" />
+                  </l:confirmationLink>
+                </div>
               </j:if>
             </td>
           </tr>
         </j:forEach>
-      </table>
-    </l:main-panel>
-  </l:layout>
+      </tbody>
+    </table>
+  </l:settings-subpage>
 </j:jelly>

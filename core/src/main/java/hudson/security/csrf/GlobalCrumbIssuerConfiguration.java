@@ -21,8 +21,10 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.security.csrf;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
 import jenkins.model.GlobalConfiguration;
@@ -33,16 +35,14 @@ import net.sf.json.JSONObject;
 import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.StaplerRequest;
-
-import edu.umd.cs.findbugs.annotations.NonNull;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * Show the crumb configuration to the system config page.
  *
  * @author Kohsuke Kawaguchi
  */
-@Extension(ordinal=195) @Symbol("crumb") // immediately after the security setting
+@Extension(ordinal = 195) @Symbol("crumb") // immediately after the security setting
 public class GlobalCrumbIssuerConfiguration extends GlobalConfiguration {
     @Override
     public @NonNull GlobalConfigurationCategory getCategory() {
@@ -50,7 +50,7 @@ public class GlobalCrumbIssuerConfiguration extends GlobalConfiguration {
     }
 
     @Override
-    public boolean configure(StaplerRequest req, JSONObject json) throws FormException {
+    public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         // for compatibility reasons, the actual value is stored in Jenkins
         Jenkins j = Jenkins.get();
 
@@ -73,10 +73,16 @@ public class GlobalCrumbIssuerConfiguration extends GlobalConfiguration {
         if (DISABLE_CSRF_PROTECTION) {
             return null;
         }
-        return new DefaultCrumbIssuer(SystemProperties.getBoolean(Jenkins.class.getName() + ".crumbIssuerProxyCompatibility", false));
+        return new DefaultCrumbIssuer();
     }
 
     @Restricted(NoExternalUse.class)
-    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "for script console")
     public static /* non-final */ boolean DISABLE_CSRF_PROTECTION = SystemProperties.getBoolean(GlobalCrumbIssuerConfiguration.class.getName() + ".DISABLE_CSRF_PROTECTION");
+
+    /** Whether CSRF protection is disabled by {@link #DISABLE_CSRF_PROTECTION}, for {@code config.jelly}. */
+    @Restricted(NoExternalUse.class)
+    public boolean isCsrfProtectionDisabled() {
+        return DISABLE_CSRF_PROTECTION;
+    }
 }

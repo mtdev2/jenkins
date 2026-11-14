@@ -1,7 +1,7 @@
 package jenkins.util;
 
 import hudson.WebAppMain;
-import javax.servlet.ServletContextEvent;
+import jakarta.servlet.ServletContextEvent;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -43,7 +43,7 @@ public class JenkinsJVM {
      */
     public static void checkJenkinsJVM() {
         if (!isJenkinsJVM()) {
-            throw new IllegalStateException("Not running on the Jenkins master JVM");
+            throw new IllegalStateException("Not running on the Jenkins controller JVM");
         }
     }
 
@@ -55,7 +55,7 @@ public class JenkinsJVM {
      */
     public static void checkNotJenkinsJVM() {
         if (isJenkinsJVM()) {
-            throw new IllegalStateException("Running on the Jenkins master JVM");
+            throw new IllegalStateException("Running on the Jenkins controller JVM");
         }
     }
 

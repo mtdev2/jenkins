@@ -21,21 +21,21 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.cli.handlers;
 
+import hudson.cli.declarative.OptionHandlerExtension;
 import hudson.model.AbstractProject;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.OptionDef;
 import org.kohsuke.args4j.spi.Setter;
-import org.kohsuke.MetaInfServices;
-import org.kohsuke.args4j.spi.OptionHandler;
 
 /**
  * Refer to {@link AbstractProject} by its name.
  *
  * @author Kohsuke Kawaguchi
  */
-@MetaInfServices(OptionHandler.class)
+@OptionHandlerExtension
 @SuppressWarnings("rawtypes")
 public class AbstractProjectOptionHandler extends GenericItemOptionHandler<AbstractProject> {
     public AbstractProjectOptionHandler(CmdLineParser parser, OptionDef option, Setter<AbstractProject> setter) {

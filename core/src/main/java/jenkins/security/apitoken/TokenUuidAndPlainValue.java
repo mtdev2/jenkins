@@ -21,8 +21,11 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security.apitoken;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.Beta;
 
@@ -37,15 +40,27 @@ public class TokenUuidAndPlainValue {
      * The token identifier to allow manipulation of the token
      */
     public final String tokenUuid;
-    
+
     /**
      * Confidential information, must not be stored.<p>
      * It's meant to be send only one to the user and then only store the hash of this value.
      */
     public final String plainValue;
-    
-    public TokenUuidAndPlainValue(String tokenUuid, String plainValue) {
+
+
+    public final String expirationDate;
+
+    public final boolean aboutToExpire;
+
+    public TokenUuidAndPlainValue(String tokenUuid, String plainValue, LocalDate expirationDate, boolean aboutToExpire) {
         this.tokenUuid = tokenUuid;
         this.plainValue = plainValue;
+        this.aboutToExpire = aboutToExpire;
+        if (expirationDate != null) {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("E, L d u");
+            this.expirationDate = formatter.format(expirationDate);
+        } else {
+            this.expirationDate = "Never";
+        }
     }
 }

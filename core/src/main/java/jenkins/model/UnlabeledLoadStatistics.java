@@ -21,9 +21,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.model;
 
-import hudson.model.Computer;
 import hudson.model.LoadStatistics;
 import hudson.model.Node;
 import hudson.model.Node.Mode;
@@ -32,7 +32,6 @@ import hudson.model.Queue;
 import hudson.model.Queue.Task;
 import hudson.model.queue.SubTask;
 import hudson.util.Iterators;
-
 import java.util.Iterator;
 
 /**
@@ -50,35 +49,6 @@ public class UnlabeledLoadStatistics extends LoadStatistics {
 
     UnlabeledLoadStatistics() {
         super(0, 0);
-    }
-
-    @Override
-    public int computeIdleExecutors() {
-        int r=0;
-        for (Computer c : Jenkins.get().getComputers()) {
-            Node node = c.getNode();
-            if (node != null && node.getMode() == Mode.NORMAL && (c.isOnline() || c.isConnecting()) && c.isAcceptingTasks()) {
-                r += c.countIdle();
-            }
-        }
-        return r;
-    }
-
-    @Override
-    public int computeTotalExecutors() {
-        int r=0;
-        for (Computer c : Jenkins.get().getComputers()) {
-            Node node = c.getNode();
-            if (node != null && node.getMode() == Mode.NORMAL && c.isOnline()) {
-                r += c.countExecutors();
-            }
-        }
-        return r;
-    }
-
-    @Override
-    public int computeQueueLength() {
-        return Jenkins.get().getQueue().strictCountBuildableItemsFor(null);
     }
 
     @Override

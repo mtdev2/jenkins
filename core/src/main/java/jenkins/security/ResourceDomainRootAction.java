@@ -21,7 +21,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security;
+
+import static java.time.Instant.now;
+import static java.time.Instant.ofEpochMilli;
+import static java.time.temporal.ChronoUnit.MINUTES;
 
 import com.google.common.annotations.VisibleForTesting;
 import edu.umd.cs.findbugs.annotations.CheckForNull;
@@ -39,8 +44,6 @@ import hudson.security.ACLContext;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import static java.time.Instant.*;
-import static java.time.temporal.ChronoUnit.MINUTES;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.logging.Level;
@@ -48,10 +51,11 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import jenkins.model.Jenkins;
 import jenkins.util.SystemProperties;
-import org.apache.commons.lang.ArrayUtils;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.*;
+import org.kohsuke.stapler.Stapler;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -68,6 +72,8 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 @Extension
 @Restricted(NoExternalUse.class)
 public class ResourceDomainRootAction implements UnprotectedRootAction {
+
+    private static final String RESOURCE_DOMAIN_ROOT_ACTION_ERROR = "jenkins.security.ResourceDomainRootAction.error";
 
     private static final Logger LOGGER = Logger.getLogger(ResourceDomainRootAction.class.getName());
 
@@ -95,17 +101,24 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
         return ExtensionList.lookupSingleton(ResourceDomainRootAction.class);
     }
 
-    public void doIndex(StaplerRequest req, StaplerResponse rsp) throws IOException {
+    public void doIndex(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
         if (ResourceDomainConfiguration.isResourceRequest(req)) {
             rsp.sendError(404, ResourceDomainFilter.ERROR_RESPONSE);
         } else {
+            req.setAttribute(RESOURCE_DOMAIN_ROOT_ACTION_ERROR, true);
             rsp.sendError(404, "Cannot handle requests to this URL unless on Jenkins resource URL.");
         }
     }
 
-    public Object getDynamic(String id, StaplerRequest req, StaplerResponse rsp) throws Exception {
+    public Object getDynamic(String id, StaplerRequest2 req, StaplerResponse2 rsp) throws Exception {
         if (!ResourceDomainConfiguration.isResourceRequest(req)) {
+            req.setAttribute(RESOURCE_DOMAIN_ROOT_ACTION_ERROR, true);
             rsp.sendError(404, "Cannot handle requests to this URL unless on Jenkins resource URL.");
+            return null;
+        }
+
+        if (!ALLOW_AUTHENTICATED_USER && !ACL.isAnonymous2(Jenkins.getAuthentication2())) {
+            rsp.sendError(400);
             return null;
         }
 
@@ -134,7 +147,7 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
             this.url = url;
         }
 
-        public void doDynamic(StaplerRequest req, StaplerResponse rsp) throws IOException {
+        public void doDynamic(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
             String restOfPath = req.getRestOfPath();
 
             String url = Jenkins.get().getRootUrl() + this.url + restOfPath;
@@ -156,7 +169,7 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
     }
 
     /**
-     * Called from {@link DirectoryBrowserSupport#generateResponse(StaplerRequest, StaplerResponse, Object)} to obtain
+     * Called from {@link DirectoryBrowserSupport#generateResponse(StaplerRequest2, StaplerResponse2, Object)} to obtain
      * a token to use when rendering a response.
      *
      * @param dbs the {@link DirectoryBrowserSupport} instance requesting the token
@@ -164,13 +177,13 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
      * @return a token that can be used to redirect users to the {@link ResourceDomainRootAction}.
      */
     @CheckForNull
-    public Token getToken(@NonNull DirectoryBrowserSupport dbs, @NonNull StaplerRequest req) {
+    public Token getToken(@NonNull DirectoryBrowserSupport dbs, @NonNull StaplerRequest2 req) {
         // This is the "restOfPath" of the DirectoryBrowserSupport, i.e. the directory/file/pattern "inside" the DBS.
         final String dbsFile = req.getOriginalRestOfPath();
 
         // Now get the 'restOfUrl' after the top-level ancestor (which is the Jenkins singleton).
         // In other words, this is the complete URL after Jenkins handled the top-level request.
-        final String completeUrl = req.getAncestors().get(0).getRestOfUrl();
+        final String completeUrl = req.getAncestors().getFirst().getRestOfUrl();
 
         // And finally, remove the 'restOfPath' suffix from the complete URL, as that's the path from Jenkins to the DBS.
         String dbsUrl = completeUrl.substring(0, completeUrl.length() - dbsFile.length());
@@ -181,7 +194,7 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
 
         try {
             return new Token(dbsUrl, authenticationName, Instant.now());
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             LOGGER.log(Level.WARNING, "Failed to encode token for URL: " + dbsUrl + " user: " + authenticationName, ex);
         }
         return null;
@@ -199,7 +212,7 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
             this.authenticationName = authenticationName;
         }
 
-        public void doDynamic(StaplerRequest req, StaplerResponse rsp) throws IOException {
+        public void doDynamic(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
             String restOfPath = req.getRestOfPath();
 
             String requestUrlSuffix = this.browserUrl;
@@ -259,6 +272,11 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
         public String toString() {
             return "[" + super.toString() + ", authentication=" + authenticationName + "; key=" + browserUrl + "]";
         }
+
+        private Object readResolve() {
+            LOGGER.log(Level.WARNING, "Blocked deserialization of InternalResourceRequest for security reasons", new Exception("stack trace"));
+            throw new SecurityException("Blocked deserialization of InternalResourceRequest for security reasons");
+        }
     }
 
     public static class Token {
@@ -267,7 +285,7 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
         private Instant timestamp;
 
         @VisibleForTesting
-        Token (@NonNull String path, @Nullable String username, @NonNull Instant timestamp) {
+        Token(@NonNull String path, @Nullable String username, @NonNull Instant timestamp) {
             this.path = path;
             this.username = Util.fixNull(username);
             this.timestamp = timestamp;
@@ -276,8 +294,11 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
         private String encode() {
             String value = timestamp.toEpochMilli() + ":" + username.length() + ":" + username + ":" + path;
             byte[] valueBytes = value.getBytes(StandardCharsets.UTF_8);
-            byte[] byteValue = ArrayUtils.addAll(KEY.mac(valueBytes), valueBytes);
-            return Base64.getUrlEncoder().encodeToString(byteValue);
+            byte[] macBytes = KEY.mac(valueBytes);
+            byte[] result = new byte[macBytes.length + valueBytes.length];
+            System.arraycopy(macBytes, 0, result, 0, macBytes.length);
+            System.arraycopy(valueBytes, 0, result, macBytes.length, valueBytes.length);
+            return Base64.getUrlEncoder().encodeToString(result);
         }
 
         private static Token decode(String value) {
@@ -297,7 +318,7 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
                 String authenticationName = authenticationNameAndBrowserUrl.substring(0, authenticationNameLength);
                 String browserUrl = authenticationNameAndBrowserUrl.substring(authenticationNameLength + 1);
                 return new Token(browserUrl, authenticationName, ofEpochMilli(Long.parseLong(epoch)));
-            } catch (Exception ex) {
+            } catch (RuntimeException ex) {
                 // Choose log level that hides people messing with the URLs
                 LOGGER.log(Level.FINE, "Failure decoding", ex);
                 return null;
@@ -309,6 +330,10 @@ public class ResourceDomainRootAction implements UnprotectedRootAction {
     private static HMACConfidentialKey KEY = new HMACConfidentialKey(ResourceDomainRootAction.class, "key");
 
     // Not @Restricted because the entire class is
-    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "for script console")
     public static /* not final for Groovy */ int VALID_FOR_MINUTES = SystemProperties.getInteger(ResourceDomainRootAction.class.getName() + ".validForMinutes", 30);
+
+    /* Escape hatch for a security hardening preventing one of the known ways to elevate arbitrary file read to RCE */
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "for script console")
+    public static /* not final for Groovy */ boolean ALLOW_AUTHENTICATED_USER = SystemProperties.getBoolean(ResourceDomainRootAction.class.getName() + ".allowAuthenticatedUser", false);
 }

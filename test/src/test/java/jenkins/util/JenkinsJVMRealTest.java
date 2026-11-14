@@ -1,31 +1,37 @@
 package jenkins.util;
 
-import hudson.slaves.DumbSlave;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+
+import hudson.model.Node;
 import java.io.IOException;
 import jenkins.security.MasterToSlaveCallable;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
+@WithJenkins
+class JenkinsJVMRealTest {
 
-public class JenkinsJVMRealTest {
+    private static JenkinsRule j;
 
-    @ClassRule
-    public static JenkinsRule j = new JenkinsRule();
+    @BeforeAll
+    static void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void isJenkinsJVM() throws Throwable {
+    void isJenkinsJVM() throws Throwable {
         assertThat(new IsJenkinsJVM().call(), is(true));
-        DumbSlave slave = j.createOnlineSlave();
+        Node slave = j.createOnlineSlave();
         assertThat(slave.getChannel().call(new IsJenkinsJVM()), is(false));
     }
 
     public static class IsJenkinsJVM extends MasterToSlaveCallable<Boolean, IOException> {
 
         @Override
-        public Boolean call() throws IOException {
+        public Boolean call() {
             return JenkinsJVM.isJenkinsJVM();
         }
     }

@@ -24,28 +24,35 @@
 
 package hudson.cli;
 
-import hudson.PluginManager;
-import hudson.PluginWrapper;
-import org.junit.Assume;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-
-import java.io.IOException;
-
 import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
 import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.assertFalse;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-import org.junit.Ignore;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-public class EnablePluginCommandTest {
+import hudson.PluginManager;
+import hudson.PluginWrapper;
+import java.io.IOException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+@WithJenkins
+class EnablePluginCommandTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     private CLICommandInvoker.Result installTestPlugin(String name) {
         return new CLICommandInvoker(j, new InstallPluginCommand())
@@ -76,7 +83,7 @@ public class EnablePluginCommandTest {
     }
 
     private void assumeNotWindows() {
-        Assume.assumeFalse(System.getProperty("os.name").startsWith("Windows"));
+        assumeFalse(System.getProperty("os.name").startsWith("Windows"));
     }
 
     private void assertJenkinsInQuietMode() {
@@ -89,7 +96,7 @@ public class EnablePluginCommandTest {
 
     @Test
     @Issue("JENKINS-52822")
-    public void enableSinglePlugin() throws IOException {
+    void enableSinglePlugin() throws IOException {
         String name = "token-macro";
         PluginManager m = j.getPluginManager();
         assertThat(m.getPlugin(name), is(nullValue()));
@@ -104,14 +111,14 @@ public class EnablePluginCommandTest {
 
     @Test
     @Issue("JENKINS-52822")
-    public void enableInvalidPluginFails() {
+    void enableInvalidPluginFails() {
         assertThat(enablePlugins("foobar"), failedWith(3));
         assertJenkinsNotInQuietMode();
     }
 
     @Test
     @Issue("JENKINS-52822")
-    public void enableDependerEnablesDependee() throws IOException {
+    void enableDependerEnablesDependee() throws IOException {
         installTestPlugin("dependee");
         installTestPlugin("depender");
         disablePlugin("depender");
@@ -122,10 +129,10 @@ public class EnablePluginCommandTest {
         assertJenkinsNotInQuietMode();
     }
 
-    @Ignore("TODO calling restart seems to break Surefire")
+    @Disabled("TODO calling restart seems to break Surefire")
     @Test
     @Issue("JENKINS-52950")
-    public void enablePluginWithRestart() throws IOException {
+    void enablePluginWithRestart() throws IOException {
         assumeNotWindows();
         String name = "credentials";
         assertThat(installTestPlugin(name), succeeded());
@@ -136,9 +143,9 @@ public class EnablePluginCommandTest {
 
     @Test
     @Issue("JENKINS-52950")
-    public void enableNoPluginsWithRestartIsNoOp() {
+    void enableNoPluginsWithRestartIsNoOp() {
         assumeNotWindows();
-        String name = "variant";
+        String name = "icon-shim";
         assertThat(installTestPlugin(name), succeeded());
         assertThat(enablePlugins("-restart", name), succeeded());
         assertJenkinsNotInQuietMode();

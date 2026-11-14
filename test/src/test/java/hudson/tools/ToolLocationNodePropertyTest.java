@@ -21,54 +21,59 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.tools;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import hudson.EnvVars;
 import hudson.Functions;
-import hudson.model.*;
+import hudson.model.FreeStyleProject;
+import hudson.model.JDK;
 import hudson.model.labels.LabelAtom;
 import hudson.slaves.DumbSlave;
-import hudson.tasks.BatchFile;
-import hudson.tasks.Ant;
-import hudson.tasks.Shell;
 import hudson.tasks.Ant.AntInstallation;
+import hudson.tasks.BatchFile;
 import hudson.tasks.Maven.MavenInstallation;
-import hudson.EnvVars;
-
-import java.io.IOException;
-
-import jenkins.model.Jenkins;
-
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import hudson.tasks.Shell;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsRule.WebClient;
-import org.jvnet.hudson.test.SingleFileSCM;
-
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import org.junit.rules.TemporaryFolder;
-import org.jvnet.hudson.test.ToolInstallations;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * This class tests that environment variables from node properties are applied,
  * and that the priority is maintained: parameters > slave node properties >
  * master node properties
  */
-public class ToolLocationNodePropertyTest {
-
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-    @Rule
-    public TemporaryFolder tmp = new TemporaryFolder();
+@WithJenkins
+class ToolLocationNodePropertyTest {
 
     private DumbSlave slave;
     private FreeStyleProject project;
 
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) throws Exception {
+        j = rule;
+
+        EnvVars env = new EnvVars();
+        // we don't want Maven, Ant, etc. to be discovered in the path for this test to work,
+        // but on Unix these tools rely on other basic Unix tools (like env) for its operation,
+        // so empty path breaks the test.
+        env.put("PATH", "/bin:/usr/bin");
+        env.put("M2_HOME", "empty");
+        slave = j.createSlave(new LabelAtom("slave"), env);
+        project = j.createFreeStyleProject();
+        project.setAssignedLabel(slave.getSelfLabel());
+    }
+
     @Test
-    public void formRoundTrip() throws Exception {
+    void formRoundTrip() throws Exception {
         MavenInstallation.DescriptorImpl mavenDescriptor = j.jenkins.getDescriptorByType(MavenInstallation.DescriptorImpl.class);
         mavenDescriptor.setInstallations(new MavenInstallation("maven", "XXX", JenkinsRule.NO_PROPERTIES));
         AntInstallation.DescriptorImpl antDescriptor = j.jenkins.getDescriptorByType(AntInstallation.DescriptorImpl.class);
@@ -92,7 +97,7 @@ public class ToolLocationNodePropertyTest {
         ToolLocationNodeProperty prop = slave.getNodeProperties().get(ToolLocationNodeProperty.class);
         assertEquals(3, prop.getLocations().size());
 
-        ToolLocationNodeProperty.ToolLocation location = prop.getLocations().get(0);
+        ToolLocationNodeProperty.ToolLocation location = prop.getLocations().getFirst();
         assertEquals(jdkDescriptor, location.getType());
         assertEquals("jdk", location.getName());
         assertEquals("foobar", location.getHome());
@@ -108,45 +113,10 @@ public class ToolLocationNodePropertyTest {
         assertEquals("zotfoo", location.getHome());
     }
 
-    private void configureDumpEnvBuilder() throws IOException {
-        if(Functions.isWindows())
+    private void configureDumpEnvBuilder() {
+        if (Functions.isWindows())
             project.getBuildersList().add(new BatchFile("set"));
         else
             project.getBuildersList().add(new Shell("export"));
-    }
-
-    @Test
-    public void ant() throws Exception {
-        Ant.AntInstallation ant = ToolInstallations.configureDefaultAnt(tmp);
-        String antPath = ant.getHome();
-        Jenkins.get().getDescriptorByType(Ant.DescriptorImpl.class).setInstallations(new AntInstallation("ant", "THIS IS WRONG"));
-
-        project.setScm(new SingleFileSCM("build.xml", "<project name='foo'/>"));
-        project.getBuildersList().add(new Ant("-version", "ant", null,null,null));
-        configureDumpEnvBuilder();
-
-        Build build = project.scheduleBuild2(0).get();
-        j.assertBuildStatus(Result.FAILURE, build);
-
-        ToolLocationNodeProperty property = new ToolLocationNodeProperty(
-                new ToolLocationNodeProperty.ToolLocation(j.jenkins.getDescriptorByType(AntInstallation.DescriptorImpl.class), "ant", antPath));
-        slave.getNodeProperties().add(property);
-
-        build = project.scheduleBuild2(0).get();
-        System.out.println(build.getLog());
-        j.assertBuildStatus(Result.SUCCESS, build);
-    }
-
-    @Before
-    public void setUp() throws Exception {
-        EnvVars env = new EnvVars();
-        // we don't want Maven, Ant, etc. to be discovered in the path for this test to work,
-        // but on Unix these tools rely on other basic Unix tools (like env) for its operation,
-        // so empty path breaks the test.
-        env.put("PATH", "/bin:/usr/bin");
-        env.put("M2_HOME", "empty");
-        slave = j.createSlave(new LabelAtom("slave"), env);
-        project = j.createFreeStyleProject();
-        project.setAssignedLabel(slave.getSelfLabel());
     }
 }

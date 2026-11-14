@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.triggers;
 
 import org.junit.jupiter.api.Test;
@@ -29,12 +30,13 @@ import org.jvnet.hudson.test.Issue;
 /**
  * @author Kanstantsin Shautsou
  */
-public class SCMTriggerTest {
+class SCMTriggerTest {
+
     @Issue({"JENKINS-29790", "JENKINS-29945"})
     @Test
-    public void testNoNPE() throws Exception {
+    void testNoNPE() {
         final SCMTrigger scmTrigger = new SCMTrigger("");
-        
+
         scmTrigger.run();
         scmTrigger.run(null);
         scmTrigger.getProjectActions();

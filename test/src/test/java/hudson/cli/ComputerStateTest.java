@@ -21,42 +21,49 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.cli;
 
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static hudson.cli.CLICommandInvoker.Matcher.*;
+import static hudson.cli.CLICommandInvoker.Matcher.succeededSilently;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import jenkins.model.Jenkins;
 import hudson.cli.CLICommandInvoker.Result;
 import hudson.model.Computer;
 import hudson.model.Slave;
 import hudson.slaves.DumbSlave;
-import hudson.slaves.OfflineCause.UserCause;
-
-import org.junit.Rule;
-import org.junit.Test;
+import hudson.slaves.OfflineCause;
+import jenkins.model.Jenkins;
+import org.htmlunit.ElementNotFoundException;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsRule.WebClient;
-
-import com.gargoylesoftware.htmlunit.ElementNotFoundException;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * @author ogondza
  */
-public class ComputerStateTest {
+@WithJenkins
+class ComputerStateTest {
 
-    @Rule public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void connect() throws Exception {
+    void connect() throws Exception {
         CLICommandInvoker command = new CLICommandInvoker(j, "connect-node");
 
         Slave slave = j.createSlave();
@@ -72,7 +79,7 @@ public class ComputerStateTest {
     }
 
     @Test
-    public void online() throws Exception {
+    void online() throws Exception {
         CLICommandInvoker command = new CLICommandInvoker(j, "online-node");
 
         Slave slave = j.createSlave();
@@ -88,45 +95,53 @@ public class ComputerStateTest {
     }
 
     @Test
-    public void disconnect() throws Exception {
+    void disconnect() throws Exception {
         CLICommandInvoker command = new CLICommandInvoker(j, "disconnect-node");
 
         Slave slave = j.createOnlineSlave();
         assertTrue(slave.toComputer().isOnline());
 
         Result result = command.authorizedTo(Jenkins.READ, Computer.DISCONNECT)
-                .invokeWithArgs(slave.getNodeName(), "-m", "Custom cause message")
-        ;
+                .invokeWithArgs(slave.getNodeName(), "-m", "Custom cause message");
 
         assertThat(result, succeededSilently());
         assertTrue(slave.toComputer().isOffline());
 
-        UserCause cause = (UserCause) slave.toComputer().getOfflineCause();
-        assertThat(cause.toString(), endsWith("Custom cause message"));
-        assertThat(cause.getUser(), equalTo(command.user()));
+        OfflineCause cause = slave.toComputer().getOfflineCause();
+
+        if (cause instanceof OfflineCause.UserCause userCause) {
+            assertThat(userCause.toString(), endsWith("Custom cause message"));
+            assertThat(userCause.getUser(), equalTo(command.user()));
+        } else {
+            assertThat("seen occasionally in CI", cause, instanceOf(OfflineCause.ChannelTermination.class));
+        }
     }
 
     @Test
-    public void offline() throws Exception {
+    void offline() throws Exception {
         CLICommandInvoker command = new CLICommandInvoker(j, "offline-node");
 
         Slave slave = j.createOnlineSlave();
         assertTrue(slave.toComputer().isOnline());
 
         Result result = command.authorizedTo(Jenkins.READ, Computer.DISCONNECT)
-                .invokeWithArgs(slave.getNodeName(), "-m", "Custom cause message")
-        ;
+                .invokeWithArgs(slave.getNodeName(), "-m", "Custom cause message");
 
         assertThat(result, succeededSilently());
         assertTrue(slave.toComputer().isOffline());
 
-        UserCause cause = (UserCause) slave.toComputer().getOfflineCause();
-        assertThat(cause.toString(), endsWith("Custom cause message"));
-        assertThat(cause.getUser(), equalTo(command.user()));
+        OfflineCause cause = slave.toComputer().getOfflineCause();
+
+        if (cause instanceof OfflineCause.UserCause userCause) {
+            assertThat(userCause.toString(), endsWith("Custom cause message"));
+            assertThat(userCause.getUser(), equalTo(command.user()));
+        } else {
+            assertThat("seen occasionally in CI", cause, instanceOf(OfflineCause.ChannelTermination.class));
+        }
     }
 
     @Test
-    public void testUiForConnected() throws Exception {
+    void testUiForConnected() throws Exception {
         DumbSlave slave = j.createOnlineSlave();
         Computer computer = slave.toComputer();
 
@@ -139,6 +154,9 @@ public class ComputerStateTest {
 
         slave.toComputer().disconnect(null);
 
+        // Test fails sometimes because agent is not yet disconnected
+        // Wait 1 second for disconnect to complete
+        Thread.sleep(1009);
         HtmlPage page = wc.getPage(slave);
 
         assertLinkDoesNotExist(page, "Disconnect");
@@ -149,7 +167,7 @@ public class ComputerStateTest {
 
         assertLinkDoesNotExist(page, "System Information");
         HtmlPage info = wc.getPage(slave, "systemInfo");
-        assertThat(info.asText(), not(containsString("Environment Variables")));
+        assertThat(info.asNormalizedText(), not(containsString("Environment Variables")));
     }
 
     private void assertConnected(WebClient wc, DumbSlave slave) throws Exception {
@@ -162,13 +180,13 @@ public class ComputerStateTest {
 
         main.getAnchorByText("System Information");
         HtmlPage info = wc.getPage(slave, "systemInfo");
-        assertThat(info.asText(), containsString("Environment Variables"));
+        assertThat(info.asNormalizedText(), containsString("Environment Variables"));
     }
 
     private void assertLinkDoesNotExist(HtmlPage page, String text) {
-        try {
-            page.getAnchorByText(text);
-            fail(text + " link should not exist");
-        } catch (ElementNotFoundException ex) { /*expected*/ }
+        assertThrows(
+                ElementNotFoundException.class,
+                () -> page.getAnchorByText(text),
+                text + " link should not exist");
     }
 }

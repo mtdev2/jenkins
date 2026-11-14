@@ -1,7 +1,12 @@
 package jenkins.security.stapler;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.ExtensionList;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Method;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jenkins.util.SystemProperties;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
@@ -14,19 +19,9 @@ import org.kohsuke.stapler.WebApp;
 import org.kohsuke.stapler.interceptor.InterceptorAnnotation;
 import org.kohsuke.stapler.lang.FieldRef;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Method;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
 @Restricted(NoExternalUse.class)
 public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
     private static final Logger LOGGER = Logger.getLogger(TypedFilter.class.getName());
-
-    private static final Map<Class<?>, Boolean> staplerCache = new HashMap<>();
 
     private boolean isClassAcceptable(Class<?> clazz) {
         if (clazz.isArray()) {
@@ -47,31 +42,23 @@ public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
                 return false;
             }
         }
-        return SKIP_TYPE_CHECK || isStaplerRelevantCached(clazz);
+        return SKIP_TYPE_CHECK || isStaplerRelevant.get(clazz);
     }
 
-    private static boolean isStaplerRelevantCached(@NonNull Class<?> clazz) {
-        if (staplerCache.containsKey(clazz)) {
-            return staplerCache.get(clazz);
+    private static final ClassValue<Boolean> isStaplerRelevant = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> clazz) {
+            return isSpecificClassStaplerRelevant(clazz) || isSuperTypesStaplerRelevant(clazz);
         }
-        boolean ret = isStaplerRelevant(clazz);
-        
-        staplerCache.put(clazz, ret);
-        return ret;
-    }
-
-    @Restricted(NoExternalUse.class)
-    public static boolean isStaplerRelevant(@NonNull Class<?> clazz) {
-        return isSpecificClassStaplerRelevant(clazz) || isSuperTypesStaplerRelevant(clazz);
-    }
+    };
 
     private static boolean isSuperTypesStaplerRelevant(@NonNull Class<?> clazz) {
         Class<?> superclass = clazz.getSuperclass();
-        if (superclass != null && isStaplerRelevantCached(superclass)) {
+        if (superclass != null && isStaplerRelevant.get(superclass)) {
             return true;
         }
         for (Class<?> interfaceClass : clazz.getInterfaces()) {
-            if (isStaplerRelevantCached(interfaceClass)) {
+            if (isStaplerRelevant.get(interfaceClass)) {
                 return true;
             }
         }
@@ -121,7 +108,7 @@ public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
                 }
             }
         }
-    
+
         for (Class<?> parameterType : m.getParameterTypes()) {
             if (WebMethodConstants.WEB_METHOD_PARAMETERS_NAMES.contains(parameterType.getName())) {
                 return true;
@@ -148,7 +135,7 @@ public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
 
         // check whitelist
         ExtensionList<RoutingDecisionProvider> decisionProviders = ExtensionList.lookup(RoutingDecisionProvider.class);
-        if (decisionProviders.size() > 0) {
+        if (!decisionProviders.isEmpty()) {
             for (RoutingDecisionProvider provider : decisionProviders) {
                 RoutingDecisionProvider.Decision fieldDecision = provider.decide(signature);
                 if (fieldDecision == RoutingDecisionProvider.Decision.ACCEPTED) {
@@ -205,7 +192,7 @@ public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
 
         // check whitelist
         ExtensionList<RoutingDecisionProvider> decision = ExtensionList.lookup(RoutingDecisionProvider.class);
-        if (decision.size() > 0) {
+        if (!decision.isEmpty()) {
             for (RoutingDecisionProvider provider : decision) {
                 RoutingDecisionProvider.Decision methodDecision = provider.decide(signature);
                 if (methodDecision == RoutingDecisionProvider.Decision.ACCEPTED) {
@@ -216,7 +203,7 @@ public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
                     LOGGER.log(Level.CONFIG, "Function {0} is not acceptable because it is blacklisted by {1}", new Object[]{signature, provider});
                     return false;
                 }
-                
+
                 Class<?> type = function.getReturnType();
                 if (type != null) {
                     String typeSignature = "class " + type.getCanonicalName();
@@ -270,10 +257,10 @@ public class TypedFilter implements FieldRef.Filter, FunctionList.Filter {
     }
 
     @Restricted(NoExternalUse.class)
-    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "for script console")
     public static /* Script Console modifiable */ boolean SKIP_TYPE_CHECK = SystemProperties.getBoolean(TypedFilter.class.getName() + ".skipTypeCheck");
 
     @Restricted(NoExternalUse.class)
-    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "for script console")
     public static /* Script Console modifiable */ boolean PROHIBIT_STATIC_ACCESS = SystemProperties.getBoolean(TypedFilter.class.getName() + ".prohibitStaticAccess", true);
 }

@@ -21,26 +21,26 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson;
-
-import hudson.util.VersionNumber;
-import jenkins.plugins.DetachedPluginsUtil;
-import org.junit.jupiter.api.Test;
-
-import java.util.List;
 
 import static jenkins.plugins.DetachedPluginsUtil.DetachedPlugin;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import hudson.util.VersionNumber;
+import java.util.List;
+import jenkins.plugins.DetachedPluginsUtil;
+import org.junit.jupiter.api.Test;
+
 /**
  * @author <a href="mailto:tom.fennelly@gmail.com">tom.fennelly@gmail.com</a>
  */
-public class ClassicPluginStrategyTest {
+class ClassicPluginStrategyTest {
 
     @Test
-    public void test_getDetachedPlugins() {
+    void test_getDetachedPlugins() {
         List<DetachedPlugin> list = DetachedPluginsUtil.getDetachedPlugins(new VersionNumber("1.296"));
 
         assertTrue(list.size() >= 14); // There were 14 at the time of writing this test

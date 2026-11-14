@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.diagnosis;
 
 import hudson.Extension;
@@ -28,7 +29,12 @@ import hudson.RestrictedSince;
 import hudson.Util;
 import hudson.model.AdministrativeMonitor;
 import hudson.security.Permission;
+import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import jenkins.model.Jenkins;
 import jenkins.security.stapler.StaplerDispatchable;
+import jenkins.util.ClientHttpRedirect;
 import org.jenkinsci.Symbol;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.DoNotUse;
@@ -36,12 +42,7 @@ import org.kohsuke.stapler.HttpRedirect;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.HttpResponses;
 import org.kohsuke.stapler.QueryParameter;
-
-import java.io.IOException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import jenkins.model.Jenkins;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
@@ -66,9 +67,14 @@ public class ReverseProxySetupMonitor extends AdministrativeMonitor {
         return true;
     }
 
+    @Override
+    public boolean isActivationFake() {
+        return true;
+    }
+
     @Restricted(DoNotUse.class) // WebOnly
     @RestrictedSince("2.235")
-    public HttpResponse doTest(StaplerRequest request, @QueryParameter boolean testWithContext) {
+    public HttpResponse doTest(StaplerRequest2 request, @QueryParameter boolean testWithContext) {
         String referer = request.getReferer();
         Jenkins j = Jenkins.get();
         String redirect;
@@ -116,13 +122,13 @@ public class ReverseProxySetupMonitor extends AdministrativeMonitor {
     @RestrictedSince("2.235")
     @RequirePOST
     public HttpResponse doAct(@QueryParameter String no) throws IOException {
-        if(no!=null) { // dismiss
+        if (no != null) { // dismiss
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             disable(true);
             // of course the irony is that this redirect won't work
             return HttpResponses.redirectViaContextPath("/manage");
         } else {
-            return new HttpRedirect("https://jenkins.io/redirect/troubleshooting/broken-reverse-proxy");
+            return new ClientHttpRedirect("https://www.jenkins.io/redirect/troubleshooting/broken-reverse-proxy");
         }
     }
 
@@ -131,4 +137,3 @@ public class ReverseProxySetupMonitor extends AdministrativeMonitor {
         return Messages.ReverseProxySetupMonitor_DisplayName();
     }
 }
-

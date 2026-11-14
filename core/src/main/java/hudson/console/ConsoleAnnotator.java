@@ -21,17 +21,17 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.console;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.MarkupText;
-
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.ListIterator;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
 
 /**
  * Annotates one line of console output.
@@ -82,14 +82,14 @@ public abstract class ConsoleAnnotator<T> implements Serializable {
      *      To indicate that you are not interested in the following lines, return {@code null}.
      */
     @CheckForNull
-    public abstract ConsoleAnnotator<T> annotate(@NonNull T context, @NonNull MarkupText text );
+    public abstract ConsoleAnnotator<T> annotate(@NonNull T context, @NonNull MarkupText text);
 
     /**
      * Cast operation that restricts T.
      */
     @SuppressWarnings("unchecked")
     public static <T> ConsoleAnnotator<T> cast(ConsoleAnnotator<? super T> a) {
-        return (ConsoleAnnotator)a;
+        return (ConsoleAnnotator) a;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"}) // unclear to jglick what is going on here
@@ -105,18 +105,23 @@ public abstract class ConsoleAnnotator<T> implements Serializable {
             ListIterator<ConsoleAnnotator<T>> itr = list.listIterator();
             while (itr.hasNext()) {
                 ConsoleAnnotator a =  itr.next();
-                ConsoleAnnotator b = a.annotate(context,text);
-                if (a!=b) {
-                    if (b==null)    itr.remove();
+                ConsoleAnnotator b = a.annotate(context, text);
+                if (a != b) {
+                    if (b == null)    itr.remove();
                     else            itr.set(b);
                 }
             }
 
-            switch (list.size()) {
-                case 0:     return null;    // no more annotator left
-                case 1:     return list.get(0); // no point in aggregating
-                default:    return this;
-            }
+            return switch (list.size()) {
+                case 0 -> null;             // no more annotator left
+                case 1 -> list.getFirst();  // no point in aggregating
+                default -> this;
+            };
+        }
+
+        @Override
+        public String toString() {
+            return "ConsoleAnnotatorAggregator" + list;
         }
     }
 
@@ -124,12 +129,11 @@ public abstract class ConsoleAnnotator<T> implements Serializable {
      * Bundles all the given {@link ConsoleAnnotator} into a single annotator.
      */
     public static <T> ConsoleAnnotator<T> combine(Collection<? extends ConsoleAnnotator<? super T>> all) {
-        switch (all.size()) {
-        case 0:     return null;    // none
-        case 1:     return  cast(all.iterator().next()); // just one
-        }
-
-        return new ConsoleAnnotatorAggregator<>(all);
+        return switch (all.size()) {
+            case 0 -> null;                         // none
+            case 1 -> cast(all.iterator().next());  // just one
+            default -> new ConsoleAnnotatorAggregator<>(all);
+        };
     }
 
     /**
@@ -149,7 +153,7 @@ public abstract class ConsoleAnnotator<T> implements Serializable {
         for (ConsoleAnnotatorFactory f : ConsoleAnnotatorFactory.all()) {
             if (f.type().isInstance(context)) {
                 ConsoleAnnotator ca = f.newInstance(context);
-                if (ca!=null)
+                if (ca != null)
                     r.add(ca);
             }
         }

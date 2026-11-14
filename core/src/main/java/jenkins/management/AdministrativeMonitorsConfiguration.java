@@ -26,29 +26,28 @@ package jenkins.management;
 
 import hudson.Extension;
 import hudson.model.AdministrativeMonitor;
+import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jenkins.model.GlobalConfiguration;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.StaplerRequest;
-
-import java.io.IOException;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.kohsuke.stapler.StaplerRequest2;
 
 @Extension
 @Restricted(NoExternalUse.class)
 public class AdministrativeMonitorsConfiguration extends GlobalConfiguration {
     @Override
-    public boolean configure(StaplerRequest req, JSONObject json) throws FormException {
+    public boolean configure(StaplerRequest2 req, JSONObject json) throws FormException {
         JSONArray monitors = json.optJSONArray("administrativeMonitor");
         for (AdministrativeMonitor am : AdministrativeMonitor.all()) {
             try {
                 boolean disable;
-                if(monitors != null) {
+                if (monitors != null) {
                     disable = !monitors.contains(am.id);
-                }else {
+                } else {
                     disable = !am.id.equals(json.optString("administrativeMonitor"));
                 }
                 am.disable(disable);

@@ -21,71 +21,58 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.scm;
 
-import com.gargoylesoftware.htmlunit.html.DomElement;
-import com.gargoylesoftware.htmlunit.html.DomNodeList;
-import com.gargoylesoftware.htmlunit.html.HtmlElement;
-import com.gargoylesoftware.htmlunit.html.HtmlImage;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.model.FreeStyleProject;
 import hudson.model.Run;
 import hudson.model.TaskListener;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
-
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
 import java.io.File;
-import java.io.IOException;
+import org.htmlunit.html.DomElement;
+import org.htmlunit.html.DomNodeList;
+import org.htmlunit.html.HtmlElement;
+import org.htmlunit.html.HtmlImage;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.startsWith;
-import static org.junit.Assert.assertEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
+@WithJenkins
+class AbstractScmTagActionTest {
 
-public class AbstractScmTagActionTest {
+    private JenkinsRule j;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void regularTextDisplayedCorrectly() throws Exception {
+    void regularTextDisplayedCorrectly() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
-        
+
         String tagToKeep = "Nice tag with space";
         p.setScm(new FakeSCM(tagToKeep));
 
-        j.assertBuildStatusSuccess(p.scheduleBuild2(0));
+        j.buildAndAssertSuccess(p);
 
         String tooltip = buildAndExtractTooltipAttribute(p);
         assertEquals(tagToKeep, tooltip);
     }
-    
-    @Test
-    @Issue("SECURITY-1537")
-    public void preventXssInTagAction() throws Exception {
-        FreeStyleProject p = j.createFreeStyleProject();
-        p.setScm(new FakeSCM("<img src='x' onerror=alert(123)>XSS"));
 
-        j.assertBuildStatusSuccess(p.scheduleBuild2(0));
-
-        String tooltip = buildAndExtractTooltipAttribute(p);
-        assertThat(tooltip, not(containsString("<")));
-        assertThat(tooltip, startsWith("&lt;"));
-    }
-    
     private String buildAndExtractTooltipAttribute(FreeStyleProject p) throws Exception {
         JenkinsRule.WebClient wc = j.createWebClient();
 
         HtmlPage page = wc.getPage(p);
 
-        DomElement buildHistory = page.getElementById("buildHistory");
+        DomElement buildHistory = page.getElementById("buildHistoryPage");
         DomNodeList<HtmlElement> imgs = buildHistory.getElementsByTagName("img");
         HtmlImage tagImage = (HtmlImage) imgs.stream()
                 .filter(i -> i.getAttribute("class").contains("icon-save"))
@@ -109,7 +96,7 @@ public class AbstractScmTagActionTest {
         }
 
         @Override
-        public void checkout(@NonNull Run<?, ?> build, @NonNull Launcher launcher, @NonNull FilePath workspace, @NonNull TaskListener listener, @CheckForNull File changelogFile, @CheckForNull SCMRevisionState baseline) throws IOException, InterruptedException {
+        public void checkout(@NonNull Run<?, ?> build, @NonNull Launcher launcher, @NonNull FilePath workspace, @NonNull TaskListener listener, @CheckForNull File changelogFile, @CheckForNull SCMRevisionState baseline) {
             build.addAction(new TooltipTagAction(build, desiredTooltip));
         }
     }

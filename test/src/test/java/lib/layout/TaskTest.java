@@ -21,56 +21,66 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package lib.layout;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.IOException;
-
-import javax.servlet.ServletException;
-
-import com.gargoylesoftware.htmlunit.html.HtmlElementUtil;
 import hudson.model.UnprotectedRootAction;
-
-import org.junit.Rule;
-import org.junit.Test;
+import jakarta.servlet.ServletException;
+import java.io.IOException;
+import org.htmlunit.html.HtmlElementUtil;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.JenkinsRule.WebClient;
 import org.jvnet.hudson.test.TestExtension;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-
+@WithJenkins
 public class TaskTest {
 
-    @Rule public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Test public void postLink() throws Exception {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
+    @Test
+    void postLink() throws Exception {
         WebClient wc = j.createWebClient();
         HtmlPage page = wc.goTo(postLink.getUrlName());
         HtmlElementUtil.click(page.getAnchorByText("POST"));
-        assertTrue("Action method should be invoked", postLink.called);
+        assertTrue(postLink.called, "Action method should be invoked");
     }
 
     @TestExtension("postLink") public static final MockAction postLink = new MockAction();
+
     public static class MockAction implements UnprotectedRootAction {
         private boolean called = false;
-        @RequirePOST public void doPost(StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
+
+        @RequirePOST public void doPost(StaplerRequest2 req, StaplerResponse2 rsp) throws ServletException, IOException {
             if (called) throw new AssertionError();
             called = true;
             rsp.forwardToPreviousPage(req);
         }
 
+        @Override
         public String getIconFileName() {
             return null;
         }
 
+        @Override
         public String getDisplayName() {
             return null;
         }
 
+        @Override
         public String getUrlName() {
             return "post-link";
         }

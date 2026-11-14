@@ -21,17 +21,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.cli;
 
-import jenkins.model.Jenkins;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
 import hudson.model.Item;
+import jenkins.model.Jenkins;
 import jenkins.model.ModifiableTopLevelItemGroup;
 import org.kohsuke.args4j.Argument;
 
 /**
  * Creates a new job by reading stdin as a configuration XML file.
- * 
+ *
  * @author Kohsuke Kawaguchi
  */
 @Extension
@@ -41,14 +43,16 @@ public class CreateJobCommand extends CLICommand {
         return Messages.CreateJobCommand_ShortDescription();
     }
 
-    @Argument(metaVar="NAME",usage="Name of the job to create",required=true)
+    @Argument(metaVar = "NAME", usage = "Name of the job to create", required = true)
+    @SuppressFBWarnings(value = "PA_PUBLIC_PRIMITIVE_ATTRIBUTE", justification = "Preserve API compatibility")
     public String name;
 
+    @Override
     protected int run() throws Exception {
         Jenkins h = Jenkins.get();
 
-        if (h.getItemByFullName(name)!=null) {
-            throw new IllegalStateException("Job '"+name+"' already exists");
+        if (h.getItemByFullName(name) != null) {
+            throw new IllegalStateException("Job '" + name + "' already exists");
         }
 
         ModifiableTopLevelItemGroup ig = h;
@@ -73,5 +77,3 @@ public class CreateJobCommand extends CLICommand {
         return 0;
     }
 }
-
-

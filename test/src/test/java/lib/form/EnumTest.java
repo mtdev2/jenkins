@@ -1,8 +1,7 @@
 package lib.form;
 
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import com.gargoylesoftware.htmlunit.html.HtmlSelect;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import hudson.Extension;
 import hudson.model.BallColor;
 import hudson.model.Describable;
@@ -11,20 +10,28 @@ import hudson.model.InvisibleAction;
 import hudson.model.RootAction;
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
-import org.junit.Rule;
-import org.junit.Test;
+import org.htmlunit.html.HtmlForm;
+import org.htmlunit.html.HtmlPage;
+import org.htmlunit.html.HtmlSelect;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
-import org.kohsuke.stapler.StaplerRequest;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+import org.kohsuke.stapler.StaplerRequest2;
 
-import static org.junit.Assert.assertEquals;
+@WithJenkins
+class EnumTest {
 
-public class EnumTest {
-    @Rule
-    public JenkinsRule rule = new JenkinsRule();
+    private JenkinsRule rule;
+
+    @BeforeEach
+    void setUp(JenkinsRule j) {
+        rule = j;
+    }
 
     @Test
-    public void testSelectionNoDefault() throws Exception {
+    void testSelectionNoDefault() throws Exception {
         HtmlForm form = getForm("noDefault");
         HtmlSelect select;
 
@@ -38,7 +45,7 @@ public class EnumTest {
     }
 
     @Test
-    public void testSelectionWithDefault() throws Exception {
+    void testSelectionWithDefault() throws Exception {
         HtmlForm form = getForm("withDefault");
         HtmlSelect select;
 
@@ -61,11 +68,12 @@ public class EnumTest {
         public BallColor enum1 = BallColor.YELLOW;
         public BallColor enum2 = null;
 
-        public void doSubmitForm(StaplerRequest req) throws Exception {
+        public void doSubmitForm(StaplerRequest2 req) throws Exception {
             JSONObject json = req.getSubmittedForm();
             System.out.println(json);
         }
 
+        @Override
         public Form.DescriptorImpl getDescriptor() {
             return Jenkins.get().getDescriptorByType(Form.DescriptorImpl.class);
         }

@@ -21,21 +21,25 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security;
 
-import static org.junit.Assert.assertEquals;
-import org.junit.Rule;
-import org.junit.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-public class RSAConfidentialKeyTest {
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-    @Rule
-    public ConfidentialStoreRule store = new ConfidentialStoreRule();
+class RSAConfidentialKeyTest {
 
     private RSAConfidentialKey key = new RSAConfidentialKey("test") {};
 
+    @BeforeEach
+    void setUp() {
+        ConfidentialStore.Mock.INSTANCE.clear();
+    }
+
     @Test
-    public void loadingExistingKey() {
+    void loadingExistingKey() {
         // this second key of the same ID will cause it to load the key from the disk
         RSAConfidentialKey key2 = new RSAConfidentialKey("test") {};
 

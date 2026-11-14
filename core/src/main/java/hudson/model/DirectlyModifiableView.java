@@ -21,14 +21,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
 
-import java.io.IOException;
-
 import edu.umd.cs.findbugs.annotations.NonNull;
-import javax.servlet.ServletException;
-
+import jakarta.servlet.ServletException;
+import java.io.IOException;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.interceptor.RequirePOST;

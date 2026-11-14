@@ -21,25 +21,25 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
-import net.sf.json.JSONArray;
-import org.kohsuke.stapler.HttpResponse;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-import org.kohsuke.stapler.export.Flavor;
+import static java.util.Arrays.asList;
 
-import javax.servlet.ServletException;
+import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collection;
-
-import static java.util.Arrays.asList;
+import net.sf.json.JSONArray;
+import org.kohsuke.stapler.HttpResponse;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
+import org.kohsuke.stapler.export.Flavor;
 
 /**
  * Model object for dynamically filed combo box, which is really just {@code ArrayList<String>}
- * 
+ *
  * @author Kohsuke Kawaguchi
  */
 public class ComboBoxModel extends ArrayList<String> implements HttpResponse {
@@ -58,7 +58,8 @@ public class ComboBoxModel extends ArrayList<String> implements HttpResponse {
         this(asList(values));
     }
 
-    public void generateResponse(StaplerRequest req, StaplerResponse rsp, Object node) throws IOException, ServletException {
+    @Override
+    public void generateResponse(StaplerRequest2 req, StaplerResponse2 rsp, Object node) throws IOException, ServletException {
         rsp.setContentType(Flavor.JSON.contentType);
         PrintWriter w = rsp.getWriter();
         JSONArray.fromObject(this).write(w);

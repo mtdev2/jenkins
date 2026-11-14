@@ -21,29 +21,38 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 
 import hudson.model.AbstractProject;
 import hudson.model.FreeStyleProject;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.StringParameterDefinition;
 import jenkins.model.ParameterizedJobMixIn;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.MatcherAssert.assertThat;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class AlternativeUiTextProviderTest {
+@WithJenkins
+class AlternativeUiTextProviderTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @TestExtension
     public static class Impl extends AlternativeUiTextProvider {
         static boolean oldschool;
+
         @SuppressWarnings("deprecation")
         @Override public <T> String getText(Message<T> text, T context) {
             if (oldschool && text == ParameterizedJobMixIn.BUILD_NOW_TEXT) {
@@ -60,13 +69,13 @@ public class AlternativeUiTextProviderTest {
      * Makes sure that {@link AlternativeUiTextProvider} actually works at some basic level.
      */
     @Test
-    public void basics() throws Exception {
+    void basics() throws Exception {
         Impl.oldschool = false;
         FreeStyleProject p = j.createFreeStyleProject("aaa");
-        assertThat(j.createWebClient().getPage(p).asText(), containsString("newschool:aaa"));
+        assertThat(j.createWebClient().getPage(p).asNormalizedText(), containsString("newschool:aaa"));
 
         Impl.oldschool = true;
-        assertThat(j.createWebClient().getPage(p).asText(), containsString("oldschool:aaa"));
+        assertThat(j.createWebClient().getPage(p).asNormalizedText(), containsString("oldschool:aaa"));
     }
 
     /**
@@ -74,15 +83,15 @@ public class AlternativeUiTextProviderTest {
      */
     @Test
     @Issue("JENKINS-41757")
-    public void basicsWithParameter() throws Exception {
+    void basicsWithParameter() throws Exception {
         Impl.oldschool = false;
         FreeStyleProject p = j.createFreeStyleProject("aaa");
         p.addProperty(new ParametersDefinitionProperty(new StringParameterDefinition("FOO", null)));
-        String pageText = j.createWebClient().getPage(p).asText();
+        String pageText = j.createWebClient().getPage(p).asNormalizedText();
         assertThat(pageText, containsString("newschool:aaa"));
 
         Impl.oldschool = true;
-        pageText = j.createWebClient().getPage(p).asText();
+        pageText = j.createWebClient().getPage(p).asNormalizedText();
         assertThat(pageText, containsString("oldschool:aaa"));
     }
 }

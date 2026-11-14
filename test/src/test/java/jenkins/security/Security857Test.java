@@ -1,56 +1,60 @@
 package jenkins.security;
 
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.WebResponse;
-import hudson.util.IOUtils;
-import org.junit.Assert;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import org.apache.commons.io.IOUtils;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.htmlunit.WebResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * Tests about the behavior expected setting different values in the escape-by-default directive and the
  * CustomJellyContext.ESCAPE_BY_DEFAULT field.
  */
-public class Security857Test {
+@WithJenkins
+class Security857Test {
 
-    private static String EVIDENCE = "<script> alert";
+    private JenkinsRule j;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     /**
      * Test that a jelly is escaped right thanks to the CustomJellyContext.ESCAPE_BY_DEFAULT field. Its default value is true.
-     * @throws Exception
      */
     @Issue("SECURITY-857")
     @Test
-    public void testJellyEscapingTrue() throws Exception {
+    void testJellyEscapingTrue() throws Exception {
         testJelly(true);
     }
 
     /**
      * Test that a jelly is not escaped when the escape-by-default='false' directive is set in it.
-     * @throws Exception
      */
     @Issue("SECURITY-857")
     @Test
-    public void testJellyEscapingFalse() throws Exception {
+    void testJellyEscapingFalse() throws Exception {
         testJelly(false);
     }
 
 
     /**
      * Test that a jelly is escaped when the escape-by-default='true' directive is set in it.
-     * @throws Exception
      */
     @Issue("SECURITY-857")
     @Test
-    public void testJellyEscapingDefault() throws Exception {
+    void testJellyEscapingDefault() throws Exception {
         testJelly(null);
     }
 
@@ -69,8 +73,8 @@ public class Security857Test {
      * @throws IOException if there are some exception reading the jelly test file.
      */
     private String getJellyContent(Boolean escape) throws IOException {
-        String jelly = IOUtils.toString(this.getClass().getResourceAsStream("escape.jelly"));
-        if(escape != null) {
+        String jelly = IOUtils.toString(this.getClass().getResourceAsStream("escape.jelly"), StandardCharsets.UTF_8);
+        if (escape != null) {
             jelly = String.format("<?jelly escape-by-default='%s'?>%n%s", escape, jelly);
         }
 
@@ -95,7 +99,7 @@ public class Security857Test {
         req.setRequestBody(jelly);
         WebResponse response = wc.getPage(req).getWebResponse();
 
-        Assert.assertEquals(200, response.getStatusCode());
+        assertEquals(200, response.getStatusCode());
         return response.getContentAsString();
     }
 
@@ -105,13 +109,14 @@ public class Security857Test {
      * @param response The response of the parse of the jelly.
      * @param escape How the escape-by-default directive was set. null: not set, true: set to true, false: set to false
      */
-    private void checkResponse(String response, Boolean escape){
+    private void checkResponse(String response, Boolean escape) {
+        String evidence = "<script> alert";
         if (escape == null) {
-            Assert.assertFalse("There is no escape-by-default tag in the jelly (true is assumed) but there are unescaped characters in the response.", response.contains(EVIDENCE));
+            assertFalse(response.contains(evidence), "There is no escape-by-default tag in the jelly (true is assumed) but there are unescaped characters in the response.");
         } else if (escape) {
-            Assert.assertFalse("Set explicitly the <?jelly escape-by-default='true' in the jelly but there are unescaped characters in the response. Jenkins is not escaping the characters and it should to.", response.contains(EVIDENCE));
+            assertFalse(response.contains(evidence), "Set explicitly the <?jelly escape-by-default='true' in the jelly but there are unescaped characters in the response. Jenkins is not escaping the characters and it should to.");
         } else {
-            Assert.assertTrue("Set explicitly the <?jelly escape-by-default='false' in the jelly but there are escaped characters in the response. Jenkins is escaping the characters and it shouldn't to.", response.contains(EVIDENCE));
+            assertTrue(response.contains(evidence), "Set explicitly the <?jelly escape-by-default='false' in the jelly but there are escaped characters in the response. Jenkins is escaping the characters and it shouldn't to.");
         }
     }
 }

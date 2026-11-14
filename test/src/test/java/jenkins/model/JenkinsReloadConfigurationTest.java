@@ -1,6 +1,8 @@
 package jenkins.model;
 
-import static org.junit.Assert.assertEquals;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import hudson.Util;
 import hudson.model.FreeStyleProject;
@@ -8,26 +10,34 @@ import hudson.model.ListView;
 import hudson.model.Node;
 import hudson.model.User;
 import hudson.tasks.Mailer;
-
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.UncheckedIOException;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * Ensure direct configuration change on disk is reflected after reload.
  *
  * @author ogondza
  */
-public class JenkinsReloadConfigurationTest {
+@WithJenkins
+class JenkinsReloadConfigurationTest {
 
-    @Rule public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void reloadMasterConfig() throws Exception {
+    void reloadBuiltinNodeConfig() throws Exception {
         Node node = j.jenkins;
         node.setLabelString("oldLabel");
 
@@ -37,17 +47,17 @@ public class JenkinsReloadConfigurationTest {
     }
 
     @Test
-    public void reloadSlaveConfig() throws Exception {
-        Node node = j.createSlave("a_slave", "oldLabel", null);
+    void reloadAgentConfig() throws Exception {
+        Node node = j.createSlave("an_agent", "oldLabel", null);
 
         modifyNode(node);
 
-        node = j.jenkins.getNode("a_slave");
+        node = j.jenkins.getNode("an_agent");
         assertEquals("newLabel", node.getLabelString());
     }
 
     private void modifyNode(Node node) throws Exception {
-        replace(node.getNodeName().equals("") ? "config.xml" : String.format("nodes/%s/config.xml",node.getNodeName()), "oldLabel", "newLabel");
+        replace(node.getNodeName().isEmpty() ? "config.xml" : String.format("nodes/%s/config.xml", node.getNodeName()), "oldLabel", "newLabel");
 
         assertEquals("oldLabel", node.getLabelString());
 
@@ -55,7 +65,7 @@ public class JenkinsReloadConfigurationTest {
     }
 
     @Test
-    public void reloadUserConfigUsingGlobalReload() throws Exception {
+    void reloadUserConfigUsingGlobalReload() throws Exception {
         String originalName = "oldName";
         String temporaryName = "newName";
         {
@@ -74,7 +84,7 @@ public class JenkinsReloadConfigurationTest {
     }
 
     @Test
-    public void reloadJobConfig() throws Exception {
+    void reloadJobConfig() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject("a_project");
         project.setDescription("oldDescription");
 
@@ -89,7 +99,7 @@ public class JenkinsReloadConfigurationTest {
     }
 
     @Test
-    public void reloadViewConfig() throws Exception {
+    void reloadViewConfig() throws Exception {
         ListView view = new ListView("a_view");
         j.jenkins.addView(view);
 
@@ -107,7 +117,7 @@ public class JenkinsReloadConfigurationTest {
     }
 
     @Test
-    public void reloadDescriptorConfig() {
+    void reloadDescriptorConfig() {
         Mailer.DescriptorImpl desc = mailerDescriptor();
         desc.setDefaultSuffix("@oldSuffix");
         desc.save();
@@ -121,23 +131,36 @@ public class JenkinsReloadConfigurationTest {
         assertEquals("@newSuffix", desc.getDefaultSuffix());
     }
 
+    @Test
+    void loadExecutorsConfig() throws Exception {
+        assertThat(j.jenkins.getNumExecutors(), is(2));
+        assertThat(j.jenkins.toComputer().getNumExecutors(), is(2));
+        replace("config.xml", "<numExecutors>2</numExecutors>", "<numExecutors>0</numExecutors>");
+        j.jenkins.load();
+        assertThat(j.jenkins.getNumExecutors(), is(0));
+        assertThat(j.jenkins.toComputer().getNumExecutors(), is(0));
+    }
+
     private Mailer.DescriptorImpl mailerDescriptor() {
-        return j.jenkins.getExtensionList(Mailer.DescriptorImpl.class).get(0);
+        return j.jenkins.getExtensionList(Mailer.DescriptorImpl.class).getFirst();
     }
 
     private void replace(String path, String search, String replace) {
 
         File configFile = new File(j.jenkins.getRootDir(), path);
+        String oldConfig;
         try {
-            String oldConfig = Util.loadFile(configFile);
+            oldConfig = Util.loadFile(configFile, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
 
-            String newConfig = oldConfig.replaceAll(search, replace);
+        String newConfig = oldConfig.replaceAll(search, replace);
 
-            FileWriter fw = new FileWriter(configFile);
-            fw.write(newConfig);
-            fw.close();
-        } catch (IOException ex) {
-            throw new AssertionError(ex);
+        try (Writer writer = Files.newBufferedWriter(configFile.toPath(), StandardCharsets.UTF_8)) {
+            writer.write(newConfig);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 }

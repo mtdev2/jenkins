@@ -24,6 +24,12 @@
 
 package hudson.cli;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.emptyString;
+import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
+
 import hudson.matrix.Axis;
 import hudson.matrix.AxisList;
 import hudson.matrix.MatrixProject;
@@ -31,32 +37,30 @@ import hudson.model.DirectlyModifiableView;
 import hudson.model.FreeStyleProject;
 import hudson.model.Label;
 import hudson.model.ListView;
-import hudson.model.labels.LabelExpression;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockFolder;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.emptyString;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.not;
+@WithJenkins
+class ListJobsCommandTest {
 
-public class ListJobsCommandTest {
-
-    @Rule public JenkinsRule j = new JenkinsRule();
     private CLICommand listJobsCommand;
     private CLICommandInvoker command;
 
-    @Before public void setUp() {
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
         listJobsCommand = new ListJobsCommand();
         command = new CLICommandInvoker(j, listJobsCommand);
     }
 
-    @Test public void getAllJobsFromView() throws Exception {
+    @Test
+    void getAllJobsFromView() throws Exception {
         MockFolder folder = j.createFolder("Folder");
         MockFolder nestedFolder = folder.createProject(MockFolder.class, "NestedFolder");
         FreeStyleProject job = folder.createProject(FreeStyleProject.class, "job");
@@ -77,7 +81,8 @@ public class ListJobsCommandTest {
     }
 
     @Issue("JENKINS-48220")
-    @Test public void getAllJobsFromFolder() throws Exception {
+    @Test
+    void getAllJobsFromFolder() throws Exception {
         MockFolder folder = j.createFolder("Folder");
         MockFolder nestedFolder = folder.createProject(MockFolder.class, "NestedFolder");
 
@@ -92,7 +97,8 @@ public class ListJobsCommandTest {
     }
 
     @Issue("JENKINS-18393")
-    @Test public void getAllJobsFromFolderWithMatrixProject() throws Exception {
+    @Test
+    void getAllJobsFromFolderWithMatrixProject() throws Exception {
         MockFolder folder = j.createFolder("Folder");
 
         FreeStyleProject job1 = folder.createProject(FreeStyleProject.class, "job1");
@@ -104,7 +110,7 @@ public class ListJobsCommandTest {
                 new Axis("axis", "a", "b")
         ));
 
-        Label label = LabelExpression.get("aws-linux-dummy");
+        Label label = Label.get("aws-linux-dummy");
         matrixProject.setAssignedLabel(label);
 
         CLICommandInvoker.Result result = command.invokeWithArgs("Folder");
@@ -115,7 +121,8 @@ public class ListJobsCommandTest {
     }
 
     @Issue("JENKINS-18393")
-    @Test public void failForMatrixProject() throws Exception {
+    @Test
+    void failForMatrixProject() throws Exception {
         MatrixProject matrixProject = j.createProject(MatrixProject.class, "mp");
 
         CLICommandInvoker.Result result = command.invokeWithArgs("MatrixJob");

@@ -24,42 +24,46 @@
 
 package hudson.cli;
 
+import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.succeededSilently;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+
 import hudson.Util;
 import hudson.model.FreeStyleProject;
 import hudson.model.ListView;
 import hudson.model.Node;
 import hudson.model.User;
 import hudson.tasks.Mailer;
-import jenkins.model.Jenkins;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-
 import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-
-import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
-
-import static hudson.cli.CLICommandInvoker.Matcher.succeededSilently;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
+import java.io.UncheckedIOException;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import jenkins.model.Jenkins;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
  * @author pjanouse
  */
-public class ReloadConfigurationCommandTest {
+@WithJenkins
+class ReloadConfigurationCommandTest {
 
     private CLICommandInvoker command;
 
-    @Rule public final JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before public void setUp() {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
         ReloadConfigurationCommand cmd = new ReloadConfigurationCommand();
 
@@ -71,17 +75,17 @@ public class ReloadConfigurationCommandTest {
     }
 
     @Test
-    public void reloadConfigurationShouldFailWithoutAdministerPermission() throws Exception {
+    void reloadConfigurationShouldFailWithoutAdministerPermission() {
         j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command.invoke();
 
         assertThat(result, failedWith(6));
         assertThat(result, hasNoStandardOutput());
-        assertThat(result.stderr(), containsString("user is missing the Overall/Administer permission"));
+        assertThat(result.stderr(), containsString("user is missing the Overall/Manage permission"));
     }
 
     @Test
-    public void reloadMasterConfig() throws Exception {
+    void reloadMasterConfig() throws Exception {
         Node node = j.jenkins;
         node.setLabelString("oldLabel");
 
@@ -91,7 +95,7 @@ public class ReloadConfigurationCommandTest {
     }
 
     @Test
-    public void reloadSlaveConfig() throws Exception {
+    void reloadSlaveConfig() throws Exception {
         Node node = j.createSlave("a_slave", "oldLabel", null);
 
         modifyNode(node);
@@ -100,8 +104,8 @@ public class ReloadConfigurationCommandTest {
         assertThat(node.getLabelString(), equalTo("newLabel"));
     }
 
-    private void modifyNode(Node node) throws Exception {
-        replace(node.getNodeName().equals("") ? "config.xml" : String.format("nodes/%s/config.xml",node.getNodeName()), "oldLabel", "newLabel");
+    private void modifyNode(Node node) {
+        replace(node.getNodeName().isEmpty() ? "config.xml" : String.format("nodes/%s/config.xml", node.getNodeName()), "oldLabel", "newLabel");
 
         assertThat(node.getLabelString(), equalTo("oldLabel"));
 
@@ -109,7 +113,7 @@ public class ReloadConfigurationCommandTest {
     }
 
     @Test
-    public void reloadUserConfig() throws Exception {
+    void reloadUserConfig() throws Exception {
         String originalName = "oldName";
         String temporaryName = "newName";
         {
@@ -129,13 +133,13 @@ public class ReloadConfigurationCommandTest {
     }
 
     @Test
-    public void reloadJobConfig() throws Exception {
+    void reloadJobConfig() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject("a_project");
         project.setDescription("oldDescription");
 
         replace("jobs/a_project/config.xml", "oldDescription", "newDescription");
 
-        assertThat( project.getDescription(), equalTo("oldDescription"));
+        assertThat(project.getDescription(), equalTo("oldDescription"));
 
         reloadJenkinsConfigurationViaCliAndWait();
 
@@ -144,7 +148,7 @@ public class ReloadConfigurationCommandTest {
     }
 
     @Test
-    public void reloadViewConfig() throws Exception {
+    void reloadViewConfig() throws Exception {
         ListView view = new ListView("a_view");
         j.jenkins.addView(view);
 
@@ -161,10 +165,10 @@ public class ReloadConfigurationCommandTest {
         assertThat(view.getIncludeRegex(), equalTo("newIncludeRegex"));
     }
 
-    @Ignore // Until fixed JENKINS-8217
+    @Disabled // Until fixed JENKINS-8217
     @Test
-    public void reloadDescriptorConfig() throws Exception {
-        Mailer.DescriptorImpl desc = j.jenkins.getExtensionList(Mailer.DescriptorImpl.class).get(0);
+    void reloadDescriptorConfig() {
+        Mailer.DescriptorImpl desc = j.jenkins.getExtensionList(Mailer.DescriptorImpl.class).getFirst();
         desc.setDefaultSuffix("@oldSuffix");
         desc.save();
 
@@ -177,7 +181,7 @@ public class ReloadConfigurationCommandTest {
         assertThat(desc.getDefaultSuffix(), equalTo("@newSuffix"));
     }
 
-    private void reloadJenkinsConfigurationViaCliAndWait() throws Exception {
+    private void reloadJenkinsConfigurationViaCliAndWait() {
         final CLICommandInvoker.Result result = command.invoke();
 
         assertThat(result, succeededSilently());
@@ -186,16 +190,19 @@ public class ReloadConfigurationCommandTest {
     private void replace(String path, String search, String replace) {
         File configFile = new File(j.jenkins.getRootDir(), path);
 
+        String oldConfig;
         try {
-            String oldConfig = Util.loadFile(configFile);
+            oldConfig = Util.loadFile(configFile, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
 
-            String newConfig = oldConfig.replaceAll(search, replace);
+        String newConfig = oldConfig.replaceAll(search, replace);
 
-            FileWriter fw = new FileWriter(configFile);
-            fw.write(newConfig);
-            fw.close();
-        } catch (IOException ex) {
-            throw new AssertionError(ex);
+        try (Writer writer = Files.newBufferedWriter(configFile.toPath(), StandardCharsets.UTF_8)) {
+            writer.write(newConfig);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 

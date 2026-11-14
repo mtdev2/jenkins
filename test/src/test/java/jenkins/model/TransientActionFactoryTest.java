@@ -24,6 +24,16 @@
 
 package jenkins.model;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Util;
 import hudson.model.AbstractItem;
 import hudson.model.AbstractProject;
@@ -34,44 +44,49 @@ import hudson.model.FreeStyleProject;
 import hudson.model.InvisibleAction;
 import hudson.model.ProminentProjectAction;
 import hudson.model.queue.FoldableAction;
-
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import org.hamcrest.Matchers;
-
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockFolder;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import edu.umd.cs.findbugs.annotations.NonNull;
+@WithJenkins
+class TransientActionFactoryTest {
 
-import static org.hamcrest.Matchers.empty;
-import static org.hamcrest.Matchers.hasSize;
-import static org.hamcrest.Matchers.is;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.hamcrest.MatcherAssert.assertThat;
+    private JenkinsRule r;
 
-public class TransientActionFactoryTest {
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
 
-    @Rule public JenkinsRule r = new JenkinsRule();
-
-    @Test public void addedToAbstractItem() throws Exception {
+    @Test
+    void addedToAbstractItem() throws Exception {
         assertNotNull(r.createFolder("d").getAction(MyAction.class));
         assertNotNull(r.createFreeStyleProject().getAction(MyAction.class));
     }
+
     @TestExtension("addedToAbstractItem") public static class TestItemFactory extends TransientActionFactory<AbstractItem> {
-        @Override public Class<AbstractItem> type() {return AbstractItem.class;}
-        @Override public Class<MyAction> actionType() {return MyAction.class;}
+        @Override public Class<AbstractItem> type() {
+            return AbstractItem.class;
+        }
+
+        @Override public Class<MyAction> actionType() {
+            return MyAction.class;
+        }
+
         @Override public Collection<? extends MyAction> createFor(AbstractItem i) {
-            return Collections.singleton(new MyAction());
+            return Set.of(new MyAction());
         }
     }
 
@@ -79,15 +94,18 @@ public class TransientActionFactoryTest {
         @Override public String getIconFileName() {
             return null;
         }
+
         @Override public String getDisplayName() {
             return null;
         }
+
         @Override public String getUrlName() {
             return null;
         }
     }
 
-    @Test public void laziness() throws Exception {
+    @Test
+    void laziness() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         // testing getAction(Class)
         assertNull(p.getAction(FoldableAction.class));
@@ -123,18 +141,27 @@ public class TransientActionFactoryTest {
         assertThat(d.getActions(ProminentProjectAction.class), Matchers.iterableWithSize(0));
         assertEquals(0, LazyFactory.count);
     }
+
     @SuppressWarnings("rawtypes")
     @TestExtension("laziness") public static class LazyFactory extends TransientActionFactory<AbstractProject> {
         static int count;
-        @Override public Class<AbstractProject> type() {return AbstractProject.class;}
-        @Override public Class<? extends Action> actionType() {return ProminentProjectAction.class;}
+
+        @Override public Class<AbstractProject> type() {
+            return AbstractProject.class;
+        }
+
+        @Override public Class<? extends Action> actionType() {
+            return ProminentProjectAction.class;
+        }
+
         @Override public Collection<? extends Action> createFor(AbstractProject p) {
             count++;
-            return Collections.singleton(new MyProminentProjectAction());
+            return Set.of(new MyProminentProjectAction());
         }
     }
 
-    @Test public void compatibility() throws Exception {
+    @Test
+    void compatibility() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         // testing getAction(Class)
         assertNull(p.getAction(FoldableAction.class));
@@ -154,18 +181,23 @@ public class TransientActionFactoryTest {
         assertThat(p.getActions(ProminentProjectAction.class), Matchers.iterableWithSize(1));
         assertEquals(2, OldFactory.count);
     }
+
     @TestExtension("compatibility") public static class OldFactory extends TransientActionFactory<FreeStyleProject> {
         static int count;
-        @Override public Class<FreeStyleProject> type() {return FreeStyleProject.class;}
+
+        @Override public Class<FreeStyleProject> type() {
+            return FreeStyleProject.class;
+    }
+
         @Override public Collection<? extends Action> createFor(FreeStyleProject p) {
             count++;
-            return Collections.singleton(new MyProminentProjectAction());
+            return Set.of(new MyProminentProjectAction());
         }
     }
 
     @Issue("JENKINS-51584")
     @Test
-    public void transientActionsAreNotPersistedOnQueueItems() throws Exception {
+    void transientActionsAreNotPersistedOnQueueItems() throws Exception {
         FreeStyleProject p = r.createFreeStyleProject();
         FreeStyleBuild build = r.buildAndAssertSuccess(p);
         // MyProminentProjectAction is only added via the TransientActionFactory and should never be persisted.
@@ -173,7 +205,23 @@ public class TransientActionFactoryTest {
         assertThat(Util.filter(build.getAllActions(), MyProminentProjectAction.class), hasSize(1));
     }
 
-    @TestExtension("transientActionsAreNotPersistedOnQueueItems")
+    /**
+     * Transient actions appear first, actions added to an Actionable appear last
+     */
+    @Test
+    void ordering() throws IOException, ExecutionException, InterruptedException {
+        var project = r.createFreeStyleProject();
+        var build = project.scheduleBuild2(0).get();
+        build.addAction(new InvisibleAction() {});
+
+        var actions = build.getActions(InvisibleAction.class);
+
+        assertThat(actions, hasSize(2));
+        assertThat(actions.get(0), instanceOf(MyProminentProjectAction.class));
+        assertThat(actions.get(1), instanceOf(InvisibleAction.class));
+    }
+
+    @TestExtension({"transientActionsAreNotPersistedOnQueueItems", "ordering"})
     public static class AllFactory extends TransientActionFactory<Actionable> {
 
         @Override
@@ -184,7 +232,7 @@ public class TransientActionFactoryTest {
         @NonNull
         @Override
         public Collection<? extends Action> createFor(@NonNull Actionable target) {
-            return Collections.singleton(new MyProminentProjectAction());
+            return Set.of(new MyProminentProjectAction());
         }
     }
 
@@ -192,16 +240,16 @@ public class TransientActionFactoryTest {
 
         private String allocation;
 
-        public MyProminentProjectAction() {
+        MyProminentProjectAction() {
             StringWriter sw = new StringWriter();
             PrintWriter pw = new PrintWriter(sw);
             new Exception("MyProminentProjectAction allocated at: ").printStackTrace(pw);
             allocation = sw.toString();
         }
 
+        @Override
         public String toString() {
             return allocation;
         }
     }
-
 }

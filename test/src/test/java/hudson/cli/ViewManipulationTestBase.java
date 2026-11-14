@@ -24,46 +24,50 @@
 
 package hudson.cli;
 
-import hudson.model.FreeStyleProject;
-import hudson.model.Job;
-import hudson.model.ListView;
-import hudson.model.View;
-import jenkins.model.Jenkins;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-
-import java.io.IOException;
-
 import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
 import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 
+import hudson.model.FreeStyleProject;
+import hudson.model.Item;
+import hudson.model.ListView;
+import hudson.model.View;
+import java.io.IOException;
+import jenkins.model.Jenkins;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
+
 /**
  * @author pjanouse
  */
-public abstract class ViewManipulationTestBase {
+@WithJenkins
+abstract class ViewManipulationTestBase {
 
     protected CLICommandInvoker command;
 
-    abstract CLICommandInvoker getCommand();
+    protected abstract CLICommandInvoker getCommand();
 
-    @Rule public final JenkinsRule j = new JenkinsRule();
+    protected JenkinsRule j;
 
-    @Before public void setUp() {
-        command = getCommand();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        command = getCommand().asUser("user");
     }
 
-    @Test public void jobViewManipulationShouldFailWithJenkinsReadPermissionOnly() throws IOException {
+    @Test void jobViewManipulationShouldFailWithJenkinsReadPermissionOnly() throws IOException {
 
         j.jenkins.addView(new ListView("aView"));
         j.createFreeStyleProject("aProject");
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ)
                 .invokeWithArgs("aView", "aProject");
 
         assertThat(result, failedWith(6));
@@ -71,13 +75,13 @@ public abstract class ViewManipulationTestBase {
         assertThat(result.stderr(), containsString("ERROR: user is missing the View/Read permission"));
     }
 
-    @Test public void jobViewManipulationShouldFailWithViewReadPermissionOnly() throws IOException {
+    @Test void jobViewManipulationShouldFailWithViewReadPermissionOnly() throws IOException {
 
         j.jenkins.addView(new ListView("aView"));
         j.createFreeStyleProject("aProject");
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ)
                 .invokeWithArgs("aView", "aProject");
 
         assertThat(result, failedWith(3));
@@ -85,13 +89,13 @@ public abstract class ViewManipulationTestBase {
         assertThat(result.stderr(), containsString("ERROR: No such job 'aProject'"));
     }
 
-    @Test public void jobViewManipulationShouldFailWithViewReadAndJobReadPermissionsOnly() throws IOException {
+    @Test void jobViewManipulationShouldFailWithViewReadAndJobReadPermissionsOnly() throws IOException {
 
         j.jenkins.addView(new ListView("aView"));
         j.createFreeStyleProject("aProject");
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ)
                 .invokeWithArgs("aView", "aProject");
 
         assertThat(result, failedWith(6));
@@ -99,15 +103,15 @@ public abstract class ViewManipulationTestBase {
         assertThat(result.stderr(), containsString("ERROR: user is missing the View/Configure permission"));
     }
 
-    @Test public void jobViewManipulationShouldFailIfTheViewIsNotDirectlyModifiable() throws Exception {
+    @Test void jobViewManipulationShouldFailIfTheViewIsNotDirectlyModifiable() throws Exception {
 
         FreeStyleProject project = j.createFreeStyleProject("aProject");
 
         assertThat(j.jenkins.getView("All").getAllItems().size(), equalTo(1));
         assertThat(j.jenkins.getView("All").contains(project), equalTo(true));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("All", "aProject");
 
         assertThat(result, failedWith(4));
@@ -116,14 +120,14 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("All").contains(project), equalTo(true));
     }
 
-    @Test public void jobViewManipulationShouldFailIfTheJobDoesNotExist() throws Exception {
+    @Test void jobViewManipulationShouldFailIfTheJobDoesNotExist() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
 
         assertThat(j.jenkins.getView("aView").getAllItems().size(), equalTo(0));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "never_created");
 
         assertThat(result, failedWith(3));
@@ -135,7 +139,6 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").getAllItems().size(), equalTo(0));
 
         result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "aProject1");
 
         assertThat(result, failedWith(3));
@@ -144,14 +147,14 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project), equalTo(false));
     }
 
-    @Test public void jobViewManipulationShouldFailIfTheJobNameIsEmpty() throws Exception {
+    @Test void jobViewManipulationShouldFailIfTheJobNameIsEmpty() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
 
         assertThat(j.jenkins.getView("aView").getAllItems().size(), equalTo(0));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "");
 
         assertThat(result, failedWith(3));
@@ -159,7 +162,7 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").getAllItems().size(), equalTo(0));
     }
 
-    @Test public void jobViewManipulationManyShouldFailIfFirstJobDoesNotExist() throws Exception {
+    @Test void jobViewManipulationManyShouldFailIfFirstJobDoesNotExist() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
         FreeStyleProject project1 = j.createFreeStyleProject("aProject1");
@@ -169,8 +172,8 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project1), equalTo(false));
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "never_created", "aProject1", "aProject2");
 
         assertThat(result, failedWith(3));
@@ -180,7 +183,7 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
     }
 
-    @Test public void jobViewManipulationManyShouldFailIfMiddleJobDoesNotExist() throws Exception {
+    @Test void jobViewManipulationManyShouldFailIfMiddleJobDoesNotExist() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
         FreeStyleProject project1 = j.createFreeStyleProject("aProject1");
@@ -190,8 +193,8 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project1), equalTo(false));
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "aProject1", "never_created", "aProject2");
 
         assertThat(result, failedWith(3));
@@ -201,7 +204,7 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
     }
 
-    @Test public void jobViewManipulationManyShouldFailIfLastJobDoesNotExist() throws Exception {
+    @Test void jobViewManipulationManyShouldFailIfLastJobDoesNotExist() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
         FreeStyleProject project1 = j.createFreeStyleProject("aProject1");
@@ -211,8 +214,8 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project1), equalTo(false));
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "aProject1", "aProject2", "never_created");
 
         assertThat(result, failedWith(3));
@@ -222,7 +225,7 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
     }
 
-    @Test public void jobViewManipulationManyShouldFailIfMoreJobsDoNotExist() throws Exception {
+    @Test void jobViewManipulationManyShouldFailIfMoreJobsDoNotExist() throws Exception {
 
         j.jenkins.addView(new ListView("aView"));
         FreeStyleProject project1 = j.createFreeStyleProject("aProject1");
@@ -232,8 +235,8 @@ public abstract class ViewManipulationTestBase {
         assertThat(j.jenkins.getView("aView").contains(project1), equalTo(false));
         assertThat(j.jenkins.getView("aView").contains(project2), equalTo(false));
 
+        j.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.READ, View.READ, Item.READ, View.CONFIGURE).everywhere().toAuthenticated());
         final CLICommandInvoker.Result result = command
-                .authorizedTo(Jenkins.READ, View.READ, Job.READ, View.CONFIGURE)
                 .invokeWithArgs("aView", "aProject1", "never_created", "aProject2", "never_created");
 
         assertThat(result, failedWith(3));

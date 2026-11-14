@@ -24,33 +24,32 @@
 
 package jenkins.model;
 
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.JenkinsRule;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.junit.Assert.assertEquals;
+@WithJenkins
+class AssetManagerTest {
 
-public class AssetManagerTest {
+    private JenkinsRule j;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-
-    @Test
-    @Issue("JENKINS-58736")
-    public void emptyAssetDoesNotThrowError() throws Exception {
-        URL url = new URL(j.getURL() + "assets");
-        HttpURLConnection httpCon = (HttpURLConnection) url.openConnection();
-        assertEquals(HttpURLConnection.HTTP_NOT_FOUND, httpCon.getResponseCode());
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
     }
 
     @Test
-    public void handlebarsLoad() throws Exception {
-        URL url = new URL(j.getURL() + "assets/handlebars/jsmodules/handlebars3.js");
+    @Issue("JENKINS-58736")
+    void emptyAssetDoesNotThrowError() throws Exception {
+        URL url = new URI(j.getURL() + "assets").toURL();
         HttpURLConnection httpCon = (HttpURLConnection) url.openConnection();
-        assertEquals(HttpURLConnection.HTTP_OK, httpCon.getResponseCode());
+        assertEquals(HttpURLConnection.HTTP_NOT_FOUND, httpCon.getResponseCode());
     }
 }

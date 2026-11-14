@@ -24,45 +24,47 @@
 
 package hudson.cli;
 
+import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.succeededSilently;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
-import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
-import static hudson.cli.CLICommandInvoker.Matcher.succeededSilently;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import hudson.model.Computer;
 import hudson.model.Messages;
 import hudson.model.Node;
 import hudson.model.Slave;
 import jenkins.model.Jenkins;
-
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-public class UpdateNodeCommandTest {
+@WithJenkins
+class UpdateNodeCommandTest {
 
     private CLICommandInvoker command;
 
-    @Rule public final JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before public void setUp() {
-
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
         command = new CLICommandInvoker(j, new UpdateNodeCommand());
     }
 
-    @Test public void updateNodeShouldFailWithoutComputerConfigurePermission() throws Exception {
+    @Test
+    void updateNodeShouldFailWithoutComputerConfigurePermission() throws Exception {
 
-        j.createSlave("MySlave", null, null);
+        j.createSlave("MyAgent", null, null);
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(Jenkins.READ)
-                .invokeWithArgs("MySlave")
+                .invokeWithArgs("MyAgent")
         ;
 
         assertThat(result.stderr(), containsString("ERROR: user is missing the Agent/Configure permission"));
@@ -70,54 +72,64 @@ public class UpdateNodeCommandTest {
         assertThat(result, hasNoStandardOutput());
     }
 
-    @Test public void updateNodeShouldModifyNodeConfiguration() throws Exception {
+    @Test
+    void updateNodeShouldModifyNodeConfiguration() throws Exception {
 
-        j.createSlave("MySlave", null, null);
+        j.createSlave("MyAgent", null, null);
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(Computer.CONFIGURE, Jenkins.READ)
                 .withStdin(Computer.class.getResourceAsStream("node.xml"))
-                .invokeWithArgs("MySlave")
+                .invokeWithArgs("MyAgent")
         ;
 
         assertThat(result, succeededSilently());
 
-        assertThat("An agent with old name should not exist", j.jenkins.getNode("MySlave"), nullValue());
+        assertThat("An agent with old name should not exist", j.jenkins.getNode("MyAgent"), nullValue());
 
-        final Node updatedSlave = j.jenkins.getNode("SlaveFromXML");
-        assertThat(updatedSlave.getNodeName(), equalTo("SlaveFromXML"));
+        final Node updatedSlave = j.jenkins.getNode("AgentFromXML");
+        assertThat(updatedSlave.getNodeName(), equalTo("AgentFromXML"));
         assertThat(updatedSlave.getNumExecutors(), equalTo(42));
     }
 
-    @Test public void updateNodeShouldFailIfNodeDoesNotExist() throws Exception {
+    @Test
+    void updateNodeShouldFailIfNodeDoesNotExist() {
 
         final CLICommandInvoker.Result result = command
                 .authorizedTo(Computer.CONFIGURE, Jenkins.READ)
                 .withStdin(Computer.class.getResourceAsStream("node.xml"))
-                .invokeWithArgs("MySlave")
+                .invokeWithArgs("MyAgent")
         ;
 
-        assertThat(result.stderr(), containsString("ERROR: No such node 'MySlave'"));
+        assertThat(result.stderr(), containsString("ERROR: No such node 'MyAgent'"));
         assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
     }
 
     @Issue("SECURITY-281")
     @Test
-    public void updateNodeShouldFailForMaster() throws Exception {
+    void updateNodeShouldFailForMaster() {
         CLICommandInvoker.Result result = command.authorizedTo(Computer.CONFIGURE, Jenkins.READ).withStdin(Computer.class.getResourceAsStream("node.xml")).invokeWithArgs("");
         assertThat(result.stderr(), containsString("No such node ''"));
         assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
+
+        // old name
         result = command.authorizedTo(Computer.EXTENDED_READ, Jenkins.READ).withStdin(Computer.class.getResourceAsStream("node.xml")).invokeWithArgs("(master)");
         assertThat(result.stderr(), containsString("No such node '(master)'"));
+        assertThat(result, failedWith(3));
+        assertThat(result, hasNoStandardOutput());
+
+        // new name
+        result = command.authorizedTo(Computer.EXTENDED_READ, Jenkins.READ).withStdin(Computer.class.getResourceAsStream("node.xml")).invokeWithArgs("(built-in)");
+        assertThat(result.stderr(), containsString("No such node '(built-in)'"));
         assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
     }
 
     @Test
     @Issue("SECURITY-2021")
-    public void updateNodeShouldFailForDotDot() throws Exception {
+    void updateNodeShouldFailForDotDot() throws Exception {
         String okName = "MyNode";
         Slave node = j.createSlave(okName, null, null);
         // currently <dummy>, but doing so will be a bit more future-proof
@@ -131,7 +143,7 @@ public class UpdateNodeCommandTest {
 
         assertThat(result.stderr(), containsString(Messages.Hudson_UnsafeChar('/')));
         assertThat(result, hasNoStandardOutput());
-        assertThat(result, failedWith(1));
+        assertThat(result, failedWith(8));
 
         assertEquals(okName, node.getNodeName());
         // ensure the other data were not saved

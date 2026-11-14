@@ -24,14 +24,23 @@
 
 package jenkins.model;
 
+import static jakarta.servlet.http.HttpServletResponse.SC_BAD_REQUEST;
+import static jakarta.servlet.http.HttpServletResponse.SC_CONFLICT;
+import static jakarta.servlet.http.HttpServletResponse.SC_CREATED;
+
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.Extension;
 import hudson.Util;
 import hudson.cli.declarative.CLIMethod;
 import hudson.cli.declarative.CLIResolver;
 import hudson.model.Action;
+import hudson.model.BuildAuthorizationToken;
 import hudson.model.BuildableItem;
 import hudson.model.Cause;
 import hudson.model.CauseAction;
 import hudson.model.Item;
+import hudson.model.ItemGroup;
 import hudson.model.Items;
 import hudson.model.Job;
 import hudson.model.ParameterDefinition;
@@ -44,22 +53,23 @@ import hudson.model.listeners.ItemListener;
 import hudson.model.queue.QueueTaskFuture;
 import hudson.search.SearchIndexBuilder;
 import hudson.triggers.Trigger;
-import hudson.triggers.TriggerDescriptor;
 import hudson.util.AlternativeUiTextProvider;
 import hudson.views.BuildButtonColumn;
+import io.jenkins.servlet.ServletExceptionWrapper;
+import jakarta.servlet.ServletException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import javax.servlet.ServletException;
-import static javax.servlet.http.HttpServletResponse.SC_CREATED;
-import static javax.servlet.http.HttpServletResponse.SC_CONFLICT;
+import jenkins.model.details.Detail;
+import jenkins.model.details.DetailFactory;
+import jenkins.model.details.ParameterizedDetail;
 import jenkins.model.lazy.LazyBuildMixIn;
+import jenkins.security.stapler.StaplerNotDispatchable;
 import jenkins.triggers.SCMTriggerItem;
+import jenkins.triggers.TriggeredItem;
 import jenkins.util.TimeDuration;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.DoNotUse;
@@ -72,7 +82,9 @@ import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.HttpResponses;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
@@ -90,7 +102,7 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  */
 @SuppressWarnings("unchecked") // AbstractItem.getParent does not correctly override; scheduleBuild2 inherently untypable
 public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & ParameterizedJobMixIn.ParameterizedJob<JobT, RunT> & Queue.Task, RunT extends Run<JobT, RunT> & Queue.Executable> {
-    
+
     protected abstract JobT asJob();
 
     /** @see BuildableItem#scheduleBuild() */
@@ -112,7 +124,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
 
     /** @see BuildableItem#scheduleBuild(int, Cause) */
     public final boolean scheduleBuild(int quietPeriod, Cause c) {
-        return scheduleBuild2(quietPeriod, c != null ? Collections.singletonList(new CauseAction(c)) : Collections.emptyList()) != null;
+        return scheduleBuild2(quietPeriod, c != null ? List.of(new CauseAction(c)) : Collections.emptyList()) != null;
     }
 
     /**
@@ -130,10 +142,12 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * @param job a job which might be schedulable
      * @param quietPeriod seconds to wait before starting; use {@code -1} to use the job’s default settings
      * @param actions various actions to associate with the scheduling, such as {@link ParametersAction} or {@link CauseAction}
-     * @return a newly created, or reused, queue item if the job could be scheduled; null if it was refused for some reason (e.g., some {@link Queue.QueueDecisionHandler} rejected it), or if {@code job} is not a {@link ParameterizedJob} or it is not {@link Job#isBuildable})
+     * @return a newly created, or reused, queue item if the job could be scheduled;
+     *      null if it was refused for some reason (e.g., some {@link Queue.QueueDecisionHandler} rejected it),
+     *      or if {@code job} is not a {@link ParameterizedJob} or it is not {@link Job#isBuildable})
      * @since 1.621
      */
-    public static @CheckForNull Queue.Item scheduleBuild2(final Job<?,?> job, int quietPeriod, Action... actions) {
+    public static @CheckForNull Queue.Item scheduleBuild2(final Job<?, ?> job, int quietPeriod, Action... actions) {
         if (!(job instanceof ParameterizedJob)) {
             return null;
         }
@@ -162,15 +176,15 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
         /*
          * This check is made ONLY if someone will call this method even if isParametrized() is false.
          */
-        if(paramDefProp == null)
+        if (paramDefProp == null)
             return defValues;
 
         /* Scan for all parameter with an associated default values */
-        for(ParameterDefinition paramDefinition : paramDefProp.getParameterDefinitions())
+        for (ParameterDefinition paramDefinition : paramDefProp.getParameterDefinitions())
         {
            ParameterValue defaultValue  = paramDefinition.getDefaultParameterValue();
 
-            if(defaultValue != null)
+            if (defaultValue != null)
                 defValues.add(defaultValue);
         }
 
@@ -188,13 +202,13 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * Standard implementation of {@link ParameterizedJob#doBuild}.
      */
     @SuppressWarnings("deprecation")
-    public final void doBuild(StaplerRequest req, StaplerResponse rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
+    public final void doBuild(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
         if (delay == null) {
-            delay=new TimeDuration(TimeUnit.MILLISECONDS.convert(asJob().getQuietPeriod(), TimeUnit.SECONDS));
+            delay = new TimeDuration(TimeUnit.MILLISECONDS.convert(asJob().getQuietPeriod(), TimeUnit.SECONDS));
         }
 
         if (!asJob().isBuildable()) {
-            throw HttpResponses.error(SC_CONFLICT, new IOException(asJob().getFullName() + " is not buildable"));
+            throw HttpResponses.errorWithoutStack(SC_CONFLICT, asJob().getFullName() + " is not buildable");
         }
 
         // if a build is parameterized, let that take over
@@ -205,7 +219,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
             return;
         }
 
-        hudson.model.BuildAuthorizationToken.checkPermission(asJob(), asJob().getAuthToken(), req, rsp);
+        BuildAuthorizationToken.checkPermission(asJob(), asJob().getAuthToken(), req, rsp);
 
         if (pp != null) {
             pp._doBuild(req, rsp, delay);
@@ -215,6 +229,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
 
         Queue.Item item = Jenkins.get().getQueue().schedule2(asJob(), delay.getTimeInSeconds(), getBuildCause(asJob(), req)).getItem();
         if (item != null) {
+            // TODO JENKINS-66105 use SC_SEE_OTHER if !ScheduleResult.created
             rsp.sendRedirect(SC_CREATED, req.getContextPath() + '/' + item.getUrl());
         } else {
             rsp.sendRedirect(".");
@@ -225,17 +240,17 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * Standard implementation of {@link ParameterizedJob#doBuildWithParameters}.
      */
     @SuppressWarnings("deprecation")
-    public final void doBuildWithParameters(StaplerRequest req, StaplerResponse rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
-        hudson.model.BuildAuthorizationToken.checkPermission(asJob(), asJob().getAuthToken(), req, rsp);
+    public final void doBuildWithParameters(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
+        BuildAuthorizationToken.checkPermission(asJob(), asJob().getAuthToken(), req, rsp);
 
         ParametersDefinitionProperty pp = asJob().getProperty(ParametersDefinitionProperty.class);
         if (!asJob().isBuildable()) {
-            throw HttpResponses.error(SC_CONFLICT, new IOException(asJob().getFullName() + " is not buildable!"));
+            throw HttpResponses.errorWithoutStack(SC_CONFLICT, asJob().getFullName() + " is not buildable");
         }
         if (pp != null) {
             pp.buildWithParameters(req, rsp, delay);
         } else {
-            throw new IllegalStateException("This build is not parameterized!");
+            throw HttpResponses.errorWithoutStack(SC_BAD_REQUEST, asJob().getFullName() + " is not parameterized");
         }
     }
 
@@ -243,7 +258,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * Standard implementation of {@link ParameterizedJob#doCancelQueue}.
      */
     @RequirePOST
-    public final void doCancelQueue( StaplerRequest req, StaplerResponse rsp ) throws IOException, ServletException {
+    public final void doCancelQueue(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
         asJob().checkPermission(Item.CANCEL);
         Jenkins.get().getQueue().cancel(asJob());
         rsp.forwardToPreviousPage(req);
@@ -265,10 +280,10 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * Computes the build cause, using RemoteCause or UserCause as appropriate.
      */
     @Restricted(NoExternalUse.class)
-    public static CauseAction getBuildCause(ParameterizedJob job, StaplerRequest req) {
+    public static CauseAction getBuildCause(ParameterizedJob job, StaplerRequest2 req) {
         Cause cause;
         @SuppressWarnings("deprecation")
-        hudson.model.BuildAuthorizationToken authToken = job.getAuthToken();
+        BuildAuthorizationToken authToken = job.getAuthToken();
         if (authToken != null && authToken.getToken() != null && req.getParameter("token") != null) {
             // Optional additional cause text when starting via token
             String causeText = req.getParameter("cause");
@@ -285,12 +300,14 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * @since 1.624
      */
     public static final AlternativeUiTextProvider.Message<ParameterizedJob> BUILD_NOW_TEXT = new AlternativeUiTextProvider.Message<>();
+    public static final AlternativeUiTextProvider.Message<ParameterizedJob> BUILD_WITH_PARAMETERS_TEXT = new AlternativeUiTextProvider.Message<>();
 
     /**
      * Suggested implementation of {@link ParameterizedJob#getBuildNowText}.
      */
     public final String getBuildNowText() {
-        return isParameterized() ? AlternativeUiTextProvider.get(BUILD_NOW_TEXT, asJob(), Messages.ParameterizedJobMixIn_build_with_parameters())
+        return isParameterized() ? AlternativeUiTextProvider.get(BUILD_WITH_PARAMETERS_TEXT, asJob(),
+                AlternativeUiTextProvider.get(BUILD_NOW_TEXT, asJob(), Messages.ParameterizedJobMixIn_build_with_parameters()))
                 : AlternativeUiTextProvider.get(BUILD_NOW_TEXT, asJob(), Messages.ParameterizedJobMixIn_build_now());
     }
 
@@ -302,7 +319,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
      * @return a configured trigger of the requested type, or null if there is none such, or {@code job} is not a {@link ParameterizedJob}
      * @since 1.621
      */
-    public static @CheckForNull <T extends Trigger<?>> T getTrigger(Job<?,?> job, Class<T> clazz) {
+    public static @CheckForNull <T extends Trigger<?>> T getTrigger(Job<?, ?> job, Class<T> clazz) {
         if (!(job instanceof ParameterizedJob)) {
             return null;
         }
@@ -317,7 +334,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
     /**
      * Marker for job using this mixin, and default implementations of many methods.
      */
-    public interface ParameterizedJob<JobT extends Job<JobT, RunT> & ParameterizedJobMixIn.ParameterizedJob<JobT, RunT> & Queue.Task, RunT extends Run<JobT, RunT> & Queue.Executable> extends BuildableItem {
+    public interface ParameterizedJob<JobT extends Job<JobT, RunT> & ParameterizedJobMixIn.ParameterizedJob<JobT, RunT> & Queue.Task, RunT extends Run<JobT, RunT> & Queue.Executable> extends BuildableItem, TriggeredItem {
 
         /**
          * Used for CLI binding.
@@ -325,7 +342,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
         @Restricted(DoNotUse.class)
         @SuppressWarnings("rawtypes")
         @CLIResolver
-        static ParameterizedJob resolveForCLI(@Argument(required=true, metaVar="NAME", usage="Job name") String name) throws CmdLineException {
+        static ParameterizedJob resolveForCLI(@Argument(required = true, metaVar = "NAME", usage = "Job name") String name) throws CmdLineException {
             ParameterizedJob item = Jenkins.get().getItemByFullName(name, ParameterizedJob.class);
             if (item == null) {
                 ParameterizedJob project = Items.findNearest(ParameterizedJob.class, name, Jenkins.get());
@@ -341,7 +358,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
          * (Would have been done entirely as an interface with default methods had this been designed for Java 8.)
          */
         default ParameterizedJobMixIn<JobT, RunT> getParameterizedJobMixIn() {
-            return new ParameterizedJobMixIn<JobT, RunT>() {
+            return new ParameterizedJobMixIn<>() {
                 @SuppressWarnings("unchecked") // untypable
                 @Override protected JobT asJob() {
                     return (JobT) ParameterizedJob.this;
@@ -350,7 +367,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
         }
 
         @SuppressWarnings("deprecation")
-        @CheckForNull hudson.model.BuildAuthorizationToken getAuthToken();
+        @CheckForNull BuildAuthorizationToken getAuthToken();
 
         /**
          * Quiet period for the job.
@@ -368,14 +385,6 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
         default String getBuildNowText() {
             return getParameterizedJobMixIn().getBuildNowText();
         }
-
-        /**
-         * Gets currently configured triggers.
-         * You may use {@code <p:config-trigger/>} to configure them.
-         * @return a map from trigger kind to instance
-         * @see #getTrigger
-         */
-        Map<TriggerDescriptor,Trigger<?>> getTriggers();
 
         @Override
         default boolean scheduleBuild(Cause c) {
@@ -403,8 +412,29 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
          * Schedules a new build command.
          * @see ParameterizedJobMixIn#doBuild
          */
-        default void doBuild(StaplerRequest req, StaplerResponse rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
-            getParameterizedJobMixIn().doBuild(req, rsp, delay);
+        default void doBuild(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
+            if (Util.isOverridden(ParameterizedJob.class, getClass(), "doBuild", StaplerRequest.class, StaplerResponse.class, TimeDuration.class)) {
+                try {
+                    doBuild(StaplerRequest.fromStaplerRequest2(req), StaplerResponse.fromStaplerResponse2(rsp), delay);
+                } catch (javax.servlet.ServletException e) {
+                    throw ServletExceptionWrapper.toJakartaServletException(e);
+                }
+            } else {
+                getParameterizedJobMixIn().doBuild(req, rsp, delay);
+            }
+        }
+
+        /**
+         * @deprecated use {@link #doBuild(StaplerRequest2, StaplerResponse2, TimeDuration)}
+         */
+        @Deprecated
+        @StaplerNotDispatchable
+        default void doBuild(StaplerRequest req, StaplerResponse rsp, @QueryParameter TimeDuration delay) throws IOException, javax.servlet.ServletException {
+            try {
+                getParameterizedJobMixIn().doBuild(StaplerRequest.toStaplerRequest2(req), StaplerResponse.toStaplerResponse2(rsp), delay);
+            } catch (ServletException e) {
+                throw ServletExceptionWrapper.fromJakartaServletException(e);
+            }
         }
 
         /**
@@ -412,8 +442,29 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
          * Currently only String parameters are supported.
          * @see ParameterizedJobMixIn#doBuildWithParameters
          */
-        default void doBuildWithParameters(StaplerRequest req, StaplerResponse rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
-            getParameterizedJobMixIn().doBuildWithParameters(req, rsp, delay);
+        default void doBuildWithParameters(StaplerRequest2 req, StaplerResponse2 rsp, @QueryParameter TimeDuration delay) throws IOException, ServletException {
+            if (Util.isOverridden(ParameterizedJob.class, getClass(), "doBuildWithParameters", StaplerRequest.class, StaplerResponse.class, TimeDuration.class)) {
+                try {
+                    doBuildWithParameters(StaplerRequest.fromStaplerRequest2(req), StaplerResponse.fromStaplerResponse2(rsp), delay);
+                } catch (javax.servlet.ServletException e) {
+                    throw ServletExceptionWrapper.toJakartaServletException(e);
+                }
+            } else {
+                getParameterizedJobMixIn().doBuildWithParameters(req, rsp, delay);
+            }
+        }
+
+        /**
+         * @deprecated use {@link #doBuildWithParameters(StaplerRequest2, StaplerResponse2, TimeDuration)}
+         */
+        @Deprecated
+        @StaplerNotDispatchable
+        default void doBuildWithParameters(StaplerRequest req, StaplerResponse rsp, @QueryParameter TimeDuration delay) throws IOException, javax.servlet.ServletException {
+            try {
+                getParameterizedJobMixIn().doBuildWithParameters(StaplerRequest.toStaplerRequest2(req), StaplerResponse.toStaplerResponse2(rsp), delay);
+            } catch (ServletException e) {
+                throw ServletExceptionWrapper.fromJakartaServletException(e);
+            }
         }
 
         /**
@@ -421,7 +472,7 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
          * @see ParameterizedJobMixIn#doCancelQueue
          */
         @RequirePOST
-        default void doCancelQueue(StaplerRequest req, StaplerResponse rsp ) throws IOException, ServletException {
+        default void doCancelQueue(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
             getParameterizedJobMixIn().doCancelQueue(req, rsp);
         }
 
@@ -429,12 +480,12 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
          * Schedules a new SCM polling command.
          */
         @SuppressWarnings("deprecation")
-        default void doPolling(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
+        default void doPolling(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException, ServletException {
             if (!(this instanceof SCMTriggerItem)) {
                 rsp.sendError(404);
                 return;
             }
-            hudson.model.BuildAuthorizationToken.checkPermission((Job) this, getAuthToken(), req, rsp);
+            BuildAuthorizationToken.checkPermission((Job) this, getAuthToken(), req, rsp);
             ((SCMTriggerItem) this).schedulePolling();
             rsp.sendRedirect(".");
         }
@@ -485,17 +536,17 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
             ItemListener.fireOnUpdated(this);
         }
 
-        @CLIMethod(name="disable-job")
+        @CLIMethod(name = "disable-job")
         @RequirePOST
-        default HttpResponse doDisable() throws IOException, ServletException {
+        default HttpResponse doDisable() throws IOException {
             checkPermission(CONFIGURE);
             makeDisabled(true);
             return new HttpRedirect(".");
         }
 
-        @CLIMethod(name="enable-job")
+        @CLIMethod(name = "enable-job")
         @RequirePOST
-        default HttpResponse doEnable() throws IOException, ServletException {
+        default HttpResponse doEnable() throws IOException {
             checkPermission(CONFIGURE);
             makeDisabled(false);
             return new HttpRedirect(".");
@@ -512,10 +563,38 @@ public abstract class ParameterizedJobMixIn<JobT extends Job<JobT, RunT> & Param
             return null;
         }
 
+        @Override
         default boolean isBuildable() {
-            return !isDisabled() && !((Job) this).isHoldOffBuildUntilSave();
+            if (isDisabled() || ((Job) this).isHoldOffBuildUntilSave()) {
+                return false;
+            }
+            // If parent is disabled, child jobs (e.g., branch jobs) should not be buildable
+            ItemGroup<? extends Item> parentGroup = ((Job) this).getParent();
+            if (parentGroup instanceof BuildableItem bi) {
+                return bi.isBuildable();
+            }
+            return true;
         }
 
+        @Extension
+        final class ParameterizedDetailFactory extends DetailFactory<Run> {
+
+            @Override
+            public Class<Run> type() {
+                return Run.class;
+            }
+
+            @NonNull
+            @Override public List<? extends Detail> createFor(@NonNull Run target) {
+                var action = target.getAction(ParametersAction.class);
+
+                if (action == null || action.getParameters().isEmpty()) {
+                    return List.of();
+                }
+
+                return List.of(new ParameterizedDetail(target));
+            }
+        }
     }
 
 }

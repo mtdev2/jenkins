@@ -21,47 +21,52 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security.seed;
 
-import com.gargoylesoftware.htmlunit.HttpMethod;
-import com.gargoylesoftware.htmlunit.WebRequest;
-import hudson.model.User;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.TestExtension;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.User;
+import java.net.URI;
+import org.htmlunit.HttpMethod;
+import org.htmlunit.WebRequest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import java.net.URL;
+@WithJenkins
+class UserSeedChangeListenerTest {
 
-import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.assertNull;
-import static org.hamcrest.MatcherAssert.assertThat;
+    private JenkinsRule j;
 
-public class UserSeedChangeListenerTest {
-
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void onProgrammaticUserSeedChange_listenerTriggered() throws Exception {
+    void onProgrammaticUserSeedChange_listenerTriggered() {
         TestUserSeedChangeListener testListener = j.jenkins.getExtensionList(UserSeedChangeListener.class).get(TestUserSeedChangeListener.class);
 
         String userId = "alice";
         User alice = User.getById(userId, true);
         assertNull(testListener.lastUserIdReceived);
-        
+
         UserSeedProperty userSeed = alice.getProperty(UserSeedProperty.class);
         assertNull(testListener.lastUserIdReceived);
-        
+
         userSeed.renewSeed();
         assertThat(testListener.lastUserIdReceived, is(userId));
         assertThat(testListener.userWasNull, is(false));
     }
 
     @Test
-    public void onWebCallUserSeedChange_listenerTriggered() throws Exception {
+    void onWebCallUserSeedChange_listenerTriggered() throws Exception {
         j.jenkins.setCrumbIssuer(null);
 
         TestUserSeedChangeListener testListener = j.jenkins.getExtensionList(UserSeedChangeListener.class).get(TestUserSeedChangeListener.class);
@@ -72,7 +77,7 @@ public class UserSeedChangeListenerTest {
 
         JenkinsRule.WebClient wc = j.createWebClient();
         WebRequest webRequest = new WebRequest(
-                new URL(j.getURL() + alice.getUrl() + "/" + userSeed.getDescriptor().getDescriptorUrl() + "/renewSessionSeed"),
+                new URI(j.getURL() + alice.getUrl() + "/" + userSeed.getDescriptor().getDescriptorUrl() + "/renewSessionSeed").toURL(),
                 HttpMethod.POST
         );
 
@@ -86,11 +91,11 @@ public class UserSeedChangeListenerTest {
     public static class TestUserSeedChangeListener extends UserSeedChangeListener {
         String lastUserIdReceived;
         boolean userWasNull;
-        
-        @Override 
+
+        @Override
         public void onUserSeedRenewed(@NonNull User user) {
             if (user == null) {
-                userWasNull = true; 
+                userWasNull = true;
             }
             lastUserIdReceived = user.getId();
         }

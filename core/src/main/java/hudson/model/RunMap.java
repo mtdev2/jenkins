@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi, Tom Huybrechts
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,26 +21,30 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
+import static java.util.logging.Level.FINEST;
+
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.Util;
+import hudson.model.listeners.RunListener;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.SortedMap;
+import java.util.function.IntPredicate;
 import java.util.logging.Level;
-
-import static java.util.logging.Level.*;
 import java.util.logging.Logger;
-import jenkins.model.RunIdMigrator;
 import jenkins.model.lazy.AbstractLazyLoadRunMap;
-import static jenkins.model.lazy.AbstractLazyLoadRunMap.Direction.*;
 import jenkins.model.lazy.BuildReference;
-import jenkins.model.lazy.LazyBuildMixIn;
-import org.apache.commons.collections.comparators.ReverseComparator;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -54,17 +58,15 @@ import org.kohsuke.accmod.restrictions.NoExternalUse;
  *
  * @author Kohsuke Kawaguchi
  */
-public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> implements Iterable<R> {
+public final class RunMap<R extends Run<?, R>> extends AbstractLazyLoadRunMap<R> implements Iterable<R> {
     /**
      * Read-only view of this map.
      */
-    private final SortedMap<Integer,R> view = Collections.unmodifiableSortedMap(this);
+    private final SortedMap<Integer, R> view = Collections.unmodifiableSortedMap(this);
+
+    private final @CheckForNull Job<?, ?> job;
 
     private Constructor<R> cons;
-
-    /** Normally overwritten by {@link LazyBuildMixIn#onLoad} or {@link LazyBuildMixIn#onCreatedFromScratch}, in turn created during {@link Job#onLoad}. */
-    @Restricted(NoExternalUse.class)
-    public RunIdMigrator runIdMigrator = new RunIdMigrator();
 
     // TODO: before first complete build
     // patch up next/previous build link
@@ -72,20 +74,38 @@ public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> 
 
     /**
      * @deprecated as of 1.485
-     *      Use {@link #RunMap(File, Constructor)}.
+     *      Use {@link #RunMap(Job, Constructor)}.
      */
     @Deprecated
     public RunMap() {
-        super(null); // will be set later
+        job = null;
+        initBaseDir(null); // will be set later
+    }
+
+    @Restricted(NoExternalUse.class)
+    public RunMap(@NonNull Job<?, ?> job) {
+        this.job = Objects.requireNonNull(job);
     }
 
     /**
      * @param cons
      *      Used to create new instance of {@link Run}.
+     * @since 2.451
      */
-    public RunMap(File baseDir, Constructor cons) {
-        super(baseDir);
+    public RunMap(@NonNull Job<?, ?> job, Constructor<R> cons) {
+        this.job = Objects.requireNonNull(job);
         this.cons = cons;
+        initBaseDir(job.getBuildDir());
+    }
+
+    /**
+     * @deprecated Use {@link #RunMap(Job, Constructor)}.
+     */
+    @Deprecated
+    public RunMap(File baseDir, Constructor<R> cons) {
+        job = null;
+        this.cons = cons;
+        initBaseDir(baseDir);
     }
 
     public boolean remove(R run) {
@@ -95,44 +115,21 @@ public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> 
     /**
      * Walks through builds, newer ones first.
      */
+    @Override
     public Iterator<R> iterator() {
-        return new Iterator<R>() {
-            R last = null;
-            R next = newestBuild();
-
-            public boolean hasNext() {
-                return next!=null;
-            }
-
-            public R next() {
-                last = next;
-                if (last!=null)
-                    next = last.getPreviousBuild();
-                else
-                    throw new NoSuchElementException();
-                return last;
-            }
-
-            @Override
-            public void remove() {
-                if (last==null)
-                    throw new UnsupportedOperationException();
-                removeValue(last);
-            }
-        };
+        return values().iterator();
     }
 
     @Override
     public boolean removeValue(R run) {
         run.dropLinks();
-        runIdMigrator.delete(dir, run.getId());
         return super.removeValue(run);
     }
 
     /**
      * Gets the read-only view of this map.
      */
-    public SortedMap<Integer,R> getView() {
+    public SortedMap<Integer, R> getView() {
         return view;
     }
 
@@ -140,32 +137,30 @@ public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> 
      * This is the newest build (with the biggest build number)
      */
     public R newestValue() {
-        return search(Integer.MAX_VALUE, DESC);
+        return newestBuild();
     }
 
     /**
      * This is the oldest build (with the smallest build number)
      */
     public R oldestValue() {
-        return search(Integer.MIN_VALUE, ASC);
+        return oldestBuild();
     }
 
     /**
      * @deprecated  as of 1.485
-     *      Use {@link ReverseComparator}
+     *      Use {@link Comparator#reverseOrder}
      */
     @Deprecated
-    public static final Comparator<Comparable> COMPARATOR = new Comparator<Comparable>() {
-        public int compare(Comparable o1, Comparable o2) {
-            return o2.compareTo(o1);
-        }
-    };
+    public static final Comparator<Comparable> COMPARATOR = Comparator.reverseOrder();
 
     /**
      * {@link Run} factory.
      */
-    public interface Constructor<R extends Run<?,R>> {
+    public interface Constructor<R extends Run<?, R>> {
         R create(File dir) throws IOException;
+
+        Class<R> getBuildClass();
     }
 
     @Override
@@ -180,30 +175,33 @@ public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> 
 
     /**
      * Add a <em>new</em> build to the map.
-     * Do not use when loading existing builds (use {@link #put(Integer, Object)}).
+     * Do not use when loading existing builds (use {@link #putAll(Map)}).
      */
     @Override
     public R put(R r) {
         // Defense against JENKINS-23152 and its ilk.
         File rootDir = r.getRootDir();
-        if (rootDir.isDirectory()) {
+        if (Files.isDirectory(rootDir.toPath())) {
             throw new IllegalStateException("JENKINS-23152: " + rootDir + " already existed; will not overwrite with " + r);
         }
         if (!r.getClass().getName().equals("hudson.matrix.MatrixRun")) { // JENKINS-26739: grandfathered in
             proposeNewNumber(r.getNumber());
         }
-        rootDir.mkdirs();
+        try {
+            Util.createDirectories(rootDir.toPath());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
         return super._put(r);
     }
 
+    @CheckForNull
     @Override public R getById(String id) {
-        int n;
         try {
-            n = Integer.parseInt(id);
-        } catch (NumberFormatException x) {
-            n = runIdMigrator.findNumber(id);
+            return getByNumber(Integer.parseInt(id));
+        } catch (NumberFormatException e) { // see https://issues.jenkins.io/browse/JENKINS-75476
+            return null;
         }
-        return getByNumber(n);
     }
 
     /**
@@ -217,9 +215,47 @@ public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> 
         return r.createReference();
     }
 
+    @Restricted(NoExternalUse.class)
+    @Override
+    protected boolean allowLoad(int buildNumber) {
+        if (job == null) {
+            LOGGER.fine(() -> "deprecated constructor without Job used on " + dir);
+            return true;
+        }
+        for (RunListener<?> l : RunListener.all()) {
+            if (!l.allowLoad(job, buildNumber)) {
+                LOGGER.finer(() -> l + " declined to load " + buildNumber + " in " + job);
+                return false;
+            }
+        }
+        LOGGER.finest(() -> "no RunListener declined to load " + buildNumber + " in " + job + " so proceeding");
+        return true;
+    }
+
+    @Restricted(NoExternalUse.class)
+    @Override
+    protected IntPredicate createLoadAllower() {
+        if (job == null) {
+            LOGGER.fine(() -> "deprecated constructor without Job used on " + dir);
+            return buildNumber -> true;
+        }
+        @SuppressWarnings("unchecked")
+        var allowers = RunListener.all().stream().map(l -> l.createLoadAllower(job)).toList();
+        return buildNumber -> {
+            for (var allower : allowers) {
+                if (!allower.test(buildNumber)) {
+                    LOGGER.finer(() -> allower + " declined to load " + buildNumber + " in " + job);
+                    return false;
+                }
+            }
+            LOGGER.finest(() -> "no RunListener declined to load " + buildNumber + " in " + job + " so proceeding");
+            return true;
+        };
+    }
+
     @Override
     protected R retrieve(File d) throws IOException {
-        if(new File(d,"build.xml").exists()) {
+        if (new File(d, "build.xml").exists()) {
             // if the build result file isn't in the directory, ignore it.
             try {
                 R b = cons.create(d);
@@ -232,7 +268,13 @@ public final class RunMap<R extends Run<?,R>> extends AbstractLazyLoadRunMap<R> 
                 LOGGER.log(Level.WARNING, "could not load " + d, e);
             }
         }
+        LOGGER.fine(() -> "no config.xml in " + d);
         return null;
+    }
+
+    @Override
+    protected Class<R> getBuildClass() {
+        return cons.getBuildClass();
     }
 
     /**

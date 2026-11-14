@@ -24,6 +24,7 @@
 
 package org.acegisecurity.acls.sid;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Objects;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -31,7 +32,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 public class PrincipalSid implements Sid {
 
     private final String principal;
-    
+
     public PrincipalSid(String principal) {
         this.principal = principal;
     }
@@ -39,6 +40,7 @@ public class PrincipalSid implements Sid {
     /**
      * @since 2.266
      */
+    @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "TODO needs triage")
     public PrincipalSid(Authentication a) {
         Object p = a.getPrincipal();
         this.principal = p instanceof UserDetails ? ((UserDetails) p).getUsername() : p.toString();
@@ -51,7 +53,7 @@ public class PrincipalSid implements Sid {
     public PrincipalSid(org.acegisecurity.Authentication a) {
         this(a.toSpring());
     }
-    
+
     public String getPrincipal() {
         return principal;
     }

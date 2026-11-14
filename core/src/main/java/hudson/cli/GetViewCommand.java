@@ -21,11 +21,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.cli;
 
 import hudson.Extension;
 import hudson.model.View;
-
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import jenkins.security.ExtendedReadRedaction;
 import org.kohsuke.args4j.Argument;
 
 /**
@@ -35,7 +38,7 @@ import org.kohsuke.args4j.Argument;
 @Extension
 public class GetViewCommand extends CLICommand {
 
-    @Argument(usage="Name of the view to obtain", required=true)
+    @Argument(usage = "Name of the view to obtain", required = true)
     private View view;
 
     @Override
@@ -48,7 +51,17 @@ public class GetViewCommand extends CLICommand {
     protected int run() throws Exception {
 
         view.checkPermission(View.READ);
-        view.writeXml(stdout);
+
+        if (view.hasPermission(View.CONFIGURE)) {
+            view.writeXml(stdout);
+        } else {
+            var baos = new ByteArrayOutputStream();
+            view.writeXml(baos);
+            String xml = baos.toString(StandardCharsets.UTF_8);
+
+            xml = ExtendedReadRedaction.applyAll(xml);
+            org.apache.commons.io.IOUtils.write(xml, stdout, StandardCharsets.UTF_8);
+        }
 
         return 0;
     }

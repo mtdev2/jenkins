@@ -1,57 +1,59 @@
 package hudson.cli;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 import hudson.EnvVars;
 import hudson.Launcher;
 import hudson.model.User;
 import hudson.util.StreamTaskListener;
-import jenkins.model.Jenkins;
-import jenkins.security.ApiTokenProperty;
-import jenkins.security.apitoken.ApiTokenTestHelper;
-import org.apache.commons.io.FileUtils;
-
-import org.junit.Assume;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.MockAuthorizationStrategy;
-
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import jenkins.model.Jenkins;
+import jenkins.security.ApiTokenProperty;
+import jenkins.security.apitoken.ApiTokenPropertyConfiguration;
+import org.apache.commons.io.FileUtils;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.nullValue;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
+@WithJenkins
+class CLIEnvVarTest {
 
-public class CLIEnvVarTest {
-
-    @Rule
-    public JenkinsRule r = new JenkinsRule();
-
-    @Rule
-    public TemporaryFolder tmp = new TemporaryFolder();
+    @TempDir
+    private File tmp;
 
     private File home;
     private File jar;
 
-    @Before
-    public void grabCliJar() throws IOException {
-        home = tmp.newFolder();
-        jar = tmp.newFile("jenkins-cli.jar");
+    private JenkinsRule r;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        r = rule;
+    }
+
+    @BeforeEach
+    void grabCliJar() throws IOException {
+        home = newFolder(tmp, "junit");
+        jar = File.createTempFile("jenkins-cli.jar", null, tmp);
         FileUtils.copyURLToFile(r.jenkins.getJnlpJars("jenkins-cli.jar").getURL(), jar);
     }
 
     @Test
-    public void testSOptionWithoutJENKINS_URL() throws Exception {
+    void testSOptionWithoutJENKINS_URL() throws Exception {
         assertEquals(0, launch("java",
                 "-Duser.home=" + home,
                 "-jar", jar.getAbsolutePath(),
@@ -61,8 +63,8 @@ public class CLIEnvVarTest {
     }
 
     @Test
-    public void testWithoutSOptionAndWithoutJENKINS_URL() throws Exception {
-        Assume.assumeThat(System.getenv("JENKINS_URL"), is(nullValue())); // TODO instead remove it from the process env?
+    void testWithoutSOptionAndWithoutJENKINS_URL() throws Exception {
+        assumeTrue(System.getenv("JENKINS_URL") == null); // TODO instead remove it from the process env?
         assertNotEquals(0, launch("java",
                 "-Duser.home=" + home,
                 "-jar", jar.getAbsolutePath(),
@@ -71,7 +73,7 @@ public class CLIEnvVarTest {
     }
 
     @Test
-    public void testJENKINS_URLWithoutSOption() throws Exception {
+    void testJENKINS_URLWithoutSOption() throws Exception {
         // Valid URL
         Map<String, String> envars = new HashMap<>();
         envars.put("JENKINS_URL", r.getURL().toString());
@@ -95,7 +97,7 @@ public class CLIEnvVarTest {
     }
 
     @Test
-    public void testSOptionOverridesJENKINS_URL() throws Exception {
+    void testSOptionOverridesJENKINS_URL() throws Exception {
         Map<String, String> envars = new HashMap<>();
         envars.put("JENKINS_URL", "http://invalid-url");
         assertEquals(0, launch(envars,
@@ -108,7 +110,7 @@ public class CLIEnvVarTest {
     }
 
     @Test
-    public void testAuthOptionWithoutEnvVars() throws Exception {
+    void testAuthOptionWithoutEnvVars() throws Exception {
         String token = getToken();
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             assertEquals(0, launch(Collections.emptyMap(), baos, null,
@@ -119,12 +121,12 @@ public class CLIEnvVarTest {
                     "-auth", String.format("%s:%s", "admin", token),
                     "who-am-i")
             );
-            assertThat(baos.toString(), containsString("Authenticated as: admin"));
+            assertThat(baos.toString(Charset.defaultCharset()), containsString("Authenticated as: admin"));
         }
     }
 
     @Test
-    public void testWithoutEnvVarsAndWithoutAuthOption() throws Exception {
+    void testWithoutEnvVarsAndWithoutAuthOption() throws Exception {
         r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
         r.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.ADMINISTER).everywhere().to("admin"));
 
@@ -136,12 +138,12 @@ public class CLIEnvVarTest {
                     "-s", r.getURL().toString(),
                     "who-am-i")
             );
-            assertThat(baos.toString(), containsString("Authenticated as: anonymous"));
+            assertThat(baos.toString(Charset.defaultCharset()), containsString("Authenticated as: anonymous"));
         }
     }
 
     @Test
-    public void testEnvVarsWithoutAuthOption() throws Exception {
+    void testEnvVarsWithoutAuthOption() throws Exception {
         String token = getToken();
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Map<String, String> envars = new HashMap<>();
@@ -154,12 +156,12 @@ public class CLIEnvVarTest {
                     "-s", r.getURL().toString(),
                     "who-am-i")
             );
-            assertThat(baos.toString(), containsString("Authenticated as: admin"));
+            assertThat(baos.toString(Charset.defaultCharset()), containsString("Authenticated as: admin"));
         }
     }
 
     @Test
-    public void testOnlyOneEnvVar() throws Exception {
+    void testOnlyOneEnvVar() throws Exception {
         String token = getToken();
 
         // only JENKINS_USER_ID
@@ -190,7 +192,7 @@ public class CLIEnvVarTest {
     }
 
     @Test
-    public void testAuthOptionOverridesEnvVars() throws Exception {
+    void testAuthOptionOverridesEnvVars() throws Exception {
         String token = getToken();
 
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
@@ -205,17 +207,18 @@ public class CLIEnvVarTest {
                     "-auth", String.format("%s:%s", "admin", token),
                     "who-am-i")
             );
-            assertThat(baos.toString(), containsString("Authenticated as: admin"));
+            assertThat(baos.toString(Charset.defaultCharset()), containsString("Authenticated as: admin"));
         }
     }
 
     private String getToken() {
-        ApiTokenTestHelper.enableLegacyBehavior();
+        ApiTokenPropertyConfiguration config = ApiTokenPropertyConfiguration.get();
+        config.setTokenGenerationOnCreationEnabled(true);
 
         r.jenkins.setSecurityRealm(r.createDummySecurityRealm());
         r.jenkins.setAuthorizationStrategy(new MockAuthorizationStrategy().grant(Jenkins.ADMINISTER).everywhere().to("admin"));
 
-        return User.get("admin").getProperty(ApiTokenProperty.class).getApiToken();
+        return User.getOrCreateByIdOrFullName("admin").getProperty(ApiTokenProperty.class).getApiToken();
     }
 
     private int launch(String... cmdArgs) throws Exception {
@@ -242,5 +245,14 @@ public class CLIEnvVarTest {
                 .stdout(out)
                 .stderr(err)
                 .join();
+    }
+
+    private static File newFolder(File root, String... subDirs) throws IOException {
+        String subFolder = String.join("/", subDirs);
+        File result = new File(root, subFolder);
+        if (!result.mkdirs()) {
+            throw new IOException("Couldn't create folders " + root);
+        }
+        return result;
     }
 }

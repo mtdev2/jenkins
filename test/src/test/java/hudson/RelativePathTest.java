@@ -1,58 +1,80 @@
 package hudson;
 
-import hudson.model.AbstractDescribableImpl;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import hudson.model.Describable;
 import hudson.model.Descriptor;
+import hudson.model.InvisibleAction;
+import hudson.model.RootAction;
 import hudson.util.ListBoxModel;
-import org.jvnet.hudson.test.HudsonTestCase;
+import java.util.Objects;
+import jenkins.model.Jenkins;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.QueryParameter;
 
-public class RelativePathTest extends HudsonTestCase implements Describable<RelativePathTest> {
+@WithJenkins
+class RelativePathTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Issue("JENKINS-18776")
-    public void testRelativePath() throws Exception {
+    @Test
+    void testRelativePath() throws Exception {
         // I was having trouble causing annotation processing on test stubs
 //        jenkins.getDescriptorOrDie(RelativePathTest.class);
 //        jenkins.getDescriptorOrDie(Model.class);
 
-        createWebClient().goTo("/self/");
-        assertTrue(((Model.DescriptorImpl) jenkins.getDescriptorOrDie(Model.class)).touched);
+        j.createWebClient().goTo("self/");
+        assertTrue(j.jenkins.getDescriptorByType(Model.DescriptorImpl.class).touched);
     }
 
-    @Override // TODO this is horrible, should change the property here and in @QueryParameter and in RelativePathTest/index.groovy to, say, personName
-    public String getName() {
-        return "Alice";
-    }
-
-    public Model getModel() {
-        return new Model();
-    }
-
-    @Override // TODO would suffice to extend AbstractDescribableImpl
-    public DescriptorImpl getDescriptor() {
-        return (DescriptorImpl) jenkins.getDescriptorOrDie(getClass());
-    }
-
-    @TestExtension
-    public static class DescriptorImpl extends Descriptor<RelativePathTest> {}
-
-    public static class Model extends AbstractDescribableImpl<Model> {
+    public static class Model implements Describable<Model> {
 
         @TestExtension
         public static class DescriptorImpl extends Descriptor<Model> {
 
             boolean touched;
 
-            public ListBoxModel doFillAbcItems(@RelativePath("..") @QueryParameter String name) {
-                assertEquals("Alice", name);
+            public ListBoxModel doFillAbcItems(@RelativePath("..") @QueryParameter String personName) {
+                assertEquals("Alice", personName);
                 touched = true;
                 return new ListBoxModel().add("foo").add("bar");
             }
-
         }
-
     }
 
+    @TestExtension
+    public static final class RootActionImpl extends InvisibleAction implements Describable<RootActionImpl>, RootAction {
+        public String getPersonName() {
+            return "Alice";
+        }
+
+        public Model getModel() {
+            return new Model();
+        }
+
+        @Override
+        public Descriptor<RootActionImpl> getDescriptor() {
+            return Objects.requireNonNull(Jenkins.get().getDescriptorByType(DescriptorImpl.class));
+        }
+
+        @TestExtension
+        public static final class DescriptorImpl extends Descriptor<RootActionImpl> {}
+
+        @Override
+        public String getUrlName() {
+            return "self";
+        }
+    }
 }

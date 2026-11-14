@@ -1,19 +1,18 @@
 package hudson.model;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
 import java.util.Collection;
-
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 
 /**
  * @author kingfai
  */
-public class AbstractItemTest {
+class AbstractItemTest {
 
     private static class StubAbstractItem extends AbstractItem {
 
@@ -27,58 +26,58 @@ public class AbstractItemTest {
         public Collection<? extends Job> getAllJobs() {
             return null;
         }
-        
+
         /**
          * Override save so that nothing happens when setDisplayName() is called
          */
         @Override
         public void save() {
-            
+
         }
     }
-    
+
     @Test
-    public void testSetDisplayName() throws Exception {
+    void testSetDisplayName() throws Exception {
         final String displayName = "testDisplayName";
         StubAbstractItem i = new StubAbstractItem();
         i.setDisplayName(displayName);
         assertEquals(displayName, i.getDisplayName());
     }
-    
+
     @Test
-    public void testGetDefaultDisplayName() {
+    void testGetDefaultDisplayName() {
         final String name = "the item name";
         StubAbstractItem i = new StubAbstractItem();
         i.doSetName(name);
         // assert that if the displayname is not set, the name is actually returned
         assertEquals(name,  i.getDisplayName());
-        
+
     }
-    
+
     @Test
-    public void testSearchNameIsName() throws Exception {
+    void testSearchNameIsName() {
         final String name = "the item name jlrtlekjtekrjkjr";
         StubAbstractItem i = new StubAbstractItem();
         i.doSetName(name);
-        
+
         assertEquals(i.getName(),  i.getSearchName());
     }
-    
+
     @Test
-    public void testGetDisplayNameOrNull() throws Exception {
+    void testGetDisplayNameOrNull() throws Exception {
         final String projectName = "projectName";
         final String displayName = "displayName";
         StubAbstractItem i = new StubAbstractItem();
         i.doSetName(projectName);
         assertEquals(projectName, i.getName());
         assertNull(i.getDisplayNameOrNull());
-        
+
         i.setDisplayName(displayName);
         assertEquals(displayName, i.getDisplayNameOrNull());
     }
 
     @Test
-    public void testSetDisplayNameOrNull() throws Exception {
+    void testSetDisplayNameOrNull() throws Exception {
         final String projectName = "projectName";
         final String displayName = "displayName";
         StubAbstractItem i = new StubAbstractItem();
@@ -92,7 +91,7 @@ public class AbstractItemTest {
 
     private static class NameNotEditableItem extends AbstractItem {
 
-        protected NameNotEditableItem(ItemGroup parent, String name){
+        protected NameNotEditableItem(ItemGroup parent, String name) {
             super(parent, name);
         }
 
@@ -109,40 +108,29 @@ public class AbstractItemTest {
 
     @Test
     @Issue("JENKINS-58571")
-    public void renameMethodShouldThrowExceptionWhenNotIsNameEditable() {
+    void renameMethodShouldThrowExceptionWhenNotIsNameEditable() {
 
         //GIVEN
-        NameNotEditableItem item = new NameNotEditableItem(null,"NameNotEditableItem");
+        NameNotEditableItem item = new NameNotEditableItem(null, "NameNotEditableItem");
 
         //WHEN
-        try {
-            item.renameTo("NewName");
-            fail("An item with isNameEditable false must throw exception when trying to rename it.");
-        } catch (IOException e) {
+        final IOException e = assertThrows(IOException.class, () -> item.renameTo("NewName"), "An item with isNameEditable false must throw exception when trying to rename it.");
 
-            //THEN
-            assertEquals("Trying to rename an item that does not support this operation.", e.getMessage());
-            assertEquals("NameNotEditableItem",item.getName());
-        }
+        assertEquals("Trying to rename an item that does not support this operation.", e.getMessage());
+        assertEquals("NameNotEditableItem", item.getName());
     }
 
     @Test
     @Issue("JENKINS-58571")
-    public void doConfirmRenameMustThrowFormFailureWhenNotIsNameEditable() throws IOException {
+    void doConfirmRenameMustThrowFormFailureWhenNotIsNameEditable() {
 
         //GIVEN
-        NameNotEditableItem item = new NameNotEditableItem(null,"NameNotEditableItem");
+        NameNotEditableItem item = new NameNotEditableItem(null, "NameNotEditableItem");
 
         //WHEN
-        try {
-            item.doConfirmRename("MyNewName");
-            fail("An item with isNameEditable false must throw exception when trying to call doConfirmRename.");
-        } catch (Failure f) {
-
-            //THEN
-            assertEquals("Trying to rename an item that does not support this operation.", f.getMessage());
-            assertEquals("NameNotEditableItem",item.getName());
-        }
+        final Failure f = assertThrows(Failure.class, () -> item.doConfirmRename("MyNewName"), "An item with isNameEditable false must throw exception when trying to call doConfirmRename.");
+        assertEquals("Trying to rename an item that does not support this operation.", f.getMessage());
+        assertEquals("NameNotEditableItem", item.getName());
     }
 
 }

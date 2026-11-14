@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi, Geoff Cummings
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,9 +21,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.util;
 
-import java.util.function.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import edu.umd.cs.findbugs.annotations.Nullable;
@@ -35,8 +35,18 @@ import hudson.model.Run;
 import hudson.model.TopLevelItem;
 import hudson.model.View;
 import hudson.util.Iterators.CountingPredicate;
-
-import java.util.*;
+import java.util.AbstractList;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.GregorianCalendar;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.Spliterator;
+import java.util.function.Predicate;
 
 /**
  * {@link List} of {@link Run}s, sorted in the descending date order.
@@ -58,7 +68,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
         base = j.getBuilds();
     }
 
-    public RunList(View view) {// this is a type unsafe operation
+    public RunList(View view) { // this is a type unsafe operation
         Set<Job> jobs = new HashSet<>();
         for (TopLevelItem item : view.getItems())
             jobs.addAll(item.getAllJobs());
@@ -86,7 +96,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
      * @return the run list.
      * @since 2.37
      */
-    public static <J extends Job<J,R>, R extends Run<J,R>> RunList<R> fromJobs(Iterable<? extends J> jobs) {
+    public static <J extends Job<J, R>, R extends Run<J, R>> RunList<R> fromJobs(Iterable<? extends J> jobs) {
         List<Iterable<R>> runLists = new ArrayList<>();
         for (Job j : jobs)
             runLists.add(j.getBuilds());
@@ -94,12 +104,10 @@ public class RunList<R extends Run> extends AbstractList<R> {
     }
 
     private static <R extends Run> Iterable<R> combine(Iterable<Iterable<R>> runLists) {
-        return Iterables.mergeSorted(runLists, new Comparator<R>() {
-            public int compare(R o1, R o2) {
-                long lhs = o1.getTimeInMillis();
-                long rhs = o2.getTimeInMillis();
-                return Long.compare(rhs, lhs);
-            }
+        return Iterables.mergeSorted(runLists, (o1, o2) -> {
+            long lhs = o1.getTimeInMillis();
+            long rhs = o2.getTimeInMillis();
+            return Long.compare(rhs, lhs);
         });
     }
 
@@ -119,8 +127,8 @@ public class RunList<R extends Run> extends AbstractList<R> {
     @Override
     @Deprecated
     public int size() {
-        if (size==null) {
-            int sz=0;
+        if (size == null) {
+            int sz = 0;
             for (R r : this) {
                 first = r;
                 sz++;
@@ -137,7 +145,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
     @Override
     @Deprecated
     public R get(int index) {
-        return Iterators.get(iterator(),index);
+        return Iterators.get(iterator(), index);
     }
 
     /**
@@ -151,15 +159,20 @@ public class RunList<R extends Run> extends AbstractList<R> {
         List<R> r = new ArrayList<>(sublistSize);
         Iterator<R> itr = iterator();
         hudson.util.Iterators.skip(itr, fromIndex);
-        for (int i=toIndex-fromIndex; i>0; i--) {
+        for (int i = toIndex - fromIndex; i > 0; i--) {
             r.add(itr.next());
         }
         return r;
     }
 
     @Override
+    public Spliterator<R> spliterator() {
+        return base.spliterator();
+    }
+
+    @Override
     public int indexOf(Object o) {
-        int index=0;
+        int index = 0;
         for (R r : this) {
             if (r.equals(o))
                 return index;
@@ -171,7 +184,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
     @Override
     public int lastIndexOf(Object o) {
         int a = -1;
-        int index=0;
+        int index = 0;
         for (R r : this) {
             if (r.equals(o))
                 a = index;
@@ -199,7 +212,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
 
     public static <R extends Run>
     RunList<R> fromRuns(Collection<? extends R> runs) {
-        return new RunList<R>((Iterable)runs);
+        return new RunList<R>((Iterable) runs);
     }
 
     /**
@@ -234,7 +247,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
     public RunList<R> filter(com.google.common.base.Predicate<R> predicate) {
         size = null;
         first = null;
-        base = Iterables.filter(base,predicate);
+        base = Iterables.filter(base, predicate);
         return this;
     }
 
@@ -247,9 +260,10 @@ public class RunList<R extends Run> extends AbstractList<R> {
         size = null;
         first = null;
         final Iterable<R> nested = base;
-        base = new Iterable<R>() {
+        base = new Iterable<>() {
+            @Override
             public Iterator<R> iterator() {
-                return hudson.util.Iterators.limit(nested.iterator(),predicate);
+                return hudson.util.Iterators.limit(nested.iterator(), predicate);
             }
 
             @Override
@@ -268,11 +282,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
      * @since 1.507
      */
     public RunList<R> limit(final int n) {
-        return limit(new CountingPredicate<R>() {
-            public boolean apply(int index, R input) {
-                return index<n;
-            }
-        });
+        return limit((index, input) -> index < n);
     }
 
     /**
@@ -325,11 +335,7 @@ public class RunList<R extends Run> extends AbstractList<R> {
      */
     public RunList<R> byTimestamp(final long start, final long end) {
         return
-        limit(new CountingPredicate<R>() {
-            public boolean apply(int index, R r) {
-                return start<=r.getTimeInMillis();
-            }
-        }).filter((Predicate<R>) r -> r.getTimeInMillis() < end);
+        limit((index, r) -> start <= r.getTimeInMillis()).filter((Predicate<R>) r -> r.getTimeInMillis() < end);
     }
 
     /**
@@ -346,10 +352,6 @@ public class RunList<R extends Run> extends AbstractList<R> {
         // can't publish on-going builds
         return filter((Predicate<R>) r -> !r.isBuilding())
         // put at least 10 builds, but otherwise ignore old builds
-        .limit(new CountingPredicate<R>() {
-            public boolean apply(int index, R r) {
-                return index < 10 || r.getTimeInMillis() >= t;
-            }
-        });
+        .limit((index, r) -> index < 10 || r.getTimeInMillis() >= t);
     }
 }

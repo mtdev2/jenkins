@@ -21,37 +21,36 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.model;
 
-import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+
 import hudson.model.JDK;
+import org.junit.jupiter.api.Test;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.modules.junit4.PowerMockRunner;
+class JDKNameTest {
 
-@RunWith(PowerMockRunner.class)
-public class JDKNameTest {
     @Test
-    public void nullIsDefaultName() {
+    void nullIsDefaultName() {
         assertThat(JDK.isDefaultName(null), is(true));
     }
-    
+
     @Test
-    public void recognizeOldDefaultName() {
+    void recognizeOldDefaultName() {
         // DEFAULT_NAME took this value prior to 1.598.
         assertThat(JDK.isDefaultName("(Default)"), is(true));
     }
-    
+
     @Test
-    public void recognizeDefaultName() {
+    void recognizeDefaultName() {
         assertThat(JDK.isDefaultName(JDK.DEFAULT_NAME), is(true));
     }
-    
+
     @Test
-    public void othernameNotDefault() {
+    void othernameNotDefault() {
         assertThat(JDK.isDefaultName("I'm a customized name"), is(false));
     }
-    
+
 }

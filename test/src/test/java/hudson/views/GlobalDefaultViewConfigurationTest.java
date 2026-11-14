@@ -21,46 +21,54 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.views;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import hudson.model.Descriptor;
 import net.sf.json.JSONObject;
-import static org.hamcrest.Matchers.*;
-import org.junit.Assert;
-import static org.hamcrest.MatcherAssert.assertThat;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.MockStaplerRequestBuilder;
-import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * Tests of {@link GlobalDefaultViewConfiguration}.
  * @author Oleg Nenashev
  */
-public class GlobalDefaultViewConfigurationTest {
-    
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-    
+@WithJenkins
+class GlobalDefaultViewConfigurationTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
     @Test
     @Issue("JENKINS-42717")
-    public void shouldNotFailIfTheDefaultViewIsMissing() {
+    void shouldNotFailIfTheDefaultViewIsMissing() {
         String viewName = "NonExistentView";
         GlobalDefaultViewConfiguration c = new GlobalDefaultViewConfiguration();
-        
-        StaplerRequest create = new MockStaplerRequestBuilder(j, "/configure").build();
+
+        StaplerRequest2 create = new MockStaplerRequestBuilder(j, "/configure").build();
         JSONObject params = new JSONObject();
         params.accumulate("primaryView", viewName);
         try {
             c.configure(create, params);
-        } catch(Descriptor.FormException ex) {
-            assertThat("Wrong exception message for the form failure", 
+        } catch (Descriptor.FormException ex) {
+            assertThat("Wrong exception message for the form failure",
                     ex.getMessage(), containsString(Messages.GlobalDefaultViewConfiguration_ViewDoesNotExist(viewName)));
             return;
         }
-        Assert.fail("Expected FormException");
+        fail("Expected FormException");
     }
-    
+
 }

@@ -21,50 +21,78 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package scripts;
 
-import com.gargoylesoftware.htmlunit.ScriptResult;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import hudson.model.InvisibleAction;
+import hudson.model.RootAction;
+import org.htmlunit.ScriptResult;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.Issue;
-import org.jvnet.hudson.test.HudsonTestCase;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
 /**
- * Tests <tt>behaviour.js</tt>
+ * Tests <code>behaviour.js</code>
  *
  * @author Kohsuke Kawaguchi
  */
-public class BehaviorTest extends HudsonTestCase {
-    public void testCssSelectors() throws Exception {
-        HtmlPage p = createWebClient().goTo("self/testCssSelectors");
+@WithJenkins
+class BehaviorTest {
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
+    @Test
+    void testCssSelectors() throws Exception {
+        HtmlPage p = j.createWebClient().goTo("self/testCssSelectors");
 
         // basic class selector, that we use the most often
-        assertEquals(2,asInt(p.executeJavaScript("findElementsBySelector($('test1'),'.a',true).length")));
-        assertEquals(1,asInt(p.executeJavaScript("findElementsBySelector($('test1'),'.a',false).length")));
+        assertEquals(2, asInt(p.executeJavaScript("findElementsBySelector(document.getElementById('test1'),'.a',true).length")));
+        assertEquals(1, asInt(p.executeJavaScript("findElementsBySelector(document.getElementById('test1'),'.a',false).length")));
 
         // 'includeSelf' should only affect the first axis and not afterward
-        assertEquals(1,asInt(p.executeJavaScript("findElementsBySelector($('test2'),'.a .b',true).length")));
-        assertEquals(1,asInt(p.executeJavaScript("findElementsBySelector($('test2'),'.a .b',false).length")));
+        assertEquals(1, asInt(p.executeJavaScript("findElementsBySelector(document.getElementById('test2'),'.a .b',true).length")));
+        assertEquals(1, asInt(p.executeJavaScript("findElementsBySelector(document.getElementById('test2'),'.a .b',false).length")));
 
         // tag.class. Should exclude itself anyway even if it's included
-        assertEquals(1,asInt(p.executeJavaScript("findElementsBySelector($('test3'),'P.a',true).length")));
-        assertEquals(1,asInt(p.executeJavaScript("findElementsBySelector($('test3'),'P.a',false).length")));
+        assertEquals(1, asInt(p.executeJavaScript("findElementsBySelector(document.getElementById('test3'),'P.a',true).length")));
+        assertEquals(1, asInt(p.executeJavaScript("findElementsBySelector(document.getElementById('test3'),'P.a',false).length")));
     }
 
     private int asInt(ScriptResult r) {
-        return ((Double)r.getJavaScriptResult()).intValue();
+        return ((Double) r.getJavaScriptResult()).intValue();
     }
 
     @Issue("JENKINS-14495")
-    public void testDuplicateRegistrations() throws Exception {
-        HtmlPage p = createWebClient().goTo("self/testDuplicateRegistrations");
+    @Test
+    void testDuplicateRegistrations() throws Exception {
+        HtmlPage p = j.createWebClient().goTo("self/testDuplicateRegistrations");
         ScriptResult r = p.executeJavaScript("document.getElementsBySelector('DIV.a')[0].innerHTML");
         assertEquals("initial and appended yet different", r.getJavaScriptResult().toString());
     }
 
-    public void testSelectorOrdering() throws Exception {
-        HtmlPage p = createWebClient().goTo("self/testSelectorOrdering");
+    @Test
+    void testSelectorOrdering() throws Exception {
+        HtmlPage p = j.createWebClient().goTo("self/testSelectorOrdering");
         ScriptResult r = p.executeJavaScript("document.getElementsBySelector('DIV.a')[0].innerHTML");
         assertEquals("initial early counted! generic weevils! late", r.getJavaScriptResult().toString());
     }
 
+    @TestExtension
+    public static final class RootActionImpl extends InvisibleAction implements RootAction {
+        @Override
+        public String getUrlName() {
+            return "self";
+        }
+    }
 }

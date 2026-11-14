@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,26 +21,25 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import hudson.ExtensionPoint;
-import hudson.ExtensionListView;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.ExtensionList;
+import hudson.ExtensionListView;
+import hudson.ExtensionPoint;
 import hudson.security.Permission;
-import jenkins.model.Jenkins;
-
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
+import jenkins.management.Badge;
+import jenkins.model.Jenkins;
 import org.jvnet.localizer.Localizable;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.interceptor.RequirePOST;
-
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
 
 /**
  * Extension point to add icon to {@code http://server/hudson/manage} page.
@@ -60,14 +59,14 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
 
     /**
      * Mostly works like {@link Action#getIconFileName()}, except that
-     * the expected icon size is 48x48, not 24x24. So if you give
-     * just a file name, "/images/48x48" will be assumed.
+     * the expected icon format is SVG. So if you give just a file name, "/images/svgs" will be assumed.
      *
      * @return
      *      As a special case, return null to exclude this object from the management link.
      *      This is useful for defining {@link ManagementLink} that only shows up under
      *      certain circumstances.
      */
+    @Override
     public abstract @CheckForNull String getIconFileName();
 
     /**
@@ -129,6 +128,19 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
     }
 
     /**
+     * Checks if the current user has the minimum required permission to view this Management Link.
+     * <p>
+     * Subclasses may override this method instead of {@link #getRequiredPermission()} to perform more complex permission checks,
+     * for example, checking either {@link Jenkins#MANAGE} or {@link Jenkins#SYSTEM_READ}.
+     * </p>
+     * @see #getRequiredPermission()
+     * @since 2.579
+     */
+    public boolean hasRequiredPermission() {
+        return Jenkins.get().hasPermission(getRequiredPermission());
+    }
+
+    /**
      * Define if the rendered link will use the default GET method or POST.
      * @return true if POST must be used
      * @see RequirePOST
@@ -160,7 +172,7 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
         try {
             return Category.valueOf(getCategoryName());
         } catch (RuntimeException e) {
-            LOGGER.log(Level.WARNING, "invalid category {0} for class {1}", new Object[]{getCategoryName() , this.getClass().getName()});
+            LOGGER.log(Level.WARNING, "invalid category {0} for class {1}", new Object[]{getCategoryName(), this.getClass().getName()});
             return Category.UNCATEGORIZED;
         }
     }
@@ -176,6 +188,12 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
          */
         CONFIGURATION(Messages._ManagementLink_Category_CONFIGURATION()),
         /**
+         * Configuration pages related to plugin management, including installation,
+         * updates, and administrative actions for maintaining installed plugins.
+         */
+        @Restricted(NoExternalUse.class)
+        PLUGINS(Messages._ManagementLink_Category_PLUGINS()),
+        /**
          * Security related options. Useful for plugins providing security related {@code ManagementLink}s (e.g. security realms).
          * Use {@link Category#STATUS} instead if the feature is informational.
          */
@@ -190,7 +208,9 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
          */
         TROUBLESHOOTING(Messages._ManagementLink_Category_TROUBLESHOOTING()),
         /**
-         * Tools are specifically tools for administrators, such as the Jenkins CLI and Script Console, as well as specific stand-alone administrative features ({@link jenkins.management.ShutdownLink}, {@link jenkins.management.ReloadLink}).
+         * Tools are specifically tools for administrators,
+         * such as the Jenkins CLI and Script Console,
+         * as well as specific stand-alone administrative features ({@link jenkins.management.ShutdownLink}, {@link jenkins.management.ReloadLink}).
          * This has nothing to do with build tools or tool installers.
          */
         TOOLS(Messages._ManagementLink_Category_TOOLS()),
@@ -203,7 +223,7 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
          */
         UNCATEGORIZED(Messages._ManagementLink_Category_UNCATEGORIZED());
 
-        private Localizable label;
+        private final Localizable label;
 
         Category(Localizable label) {
             this.label = label;
@@ -212,6 +232,16 @@ public abstract class ManagementLink implements ExtensionPoint, Action {
         public @NonNull String getLabel() {
             return label.toString();
         }
+    }
+
+    /**
+     * A {@link Badge} shown as overlay over the icon on "Manage Jenkins".
+     *
+     * @return badge or {@code null} if no badge should be shown.
+     * @since 2.385
+     */
+    public @CheckForNull Badge getBadge() {
+        return null;
     }
 
     private static final Logger LOGGER = Logger.getLogger(ManagementLink.class.getName());

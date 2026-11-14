@@ -21,16 +21,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
+import com.thoughtworks.xstream.converters.UnmarshallingContext;
 import hudson.diagnosis.OldDataMonitor;
 import hudson.model.Queue.Task;
 import hudson.model.queue.FoldableAction;
 import hudson.util.XStream2;
-import org.kohsuke.stapler.export.Exported;
-import org.kohsuke.stapler.export.ExportedBean;
-import com.thoughtworks.xstream.converters.UnmarshallingContext;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -39,6 +37,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import jenkins.model.RunAction2;
+import jenkins.security.XStreamDeserializable;
+import org.kohsuke.stapler.export.Exported;
+import org.kohsuke.stapler.export.ExportedBean;
 
 @ExportedBean
 public class CauseAction implements FoldableAction, RunAction2 {
@@ -46,14 +47,16 @@ public class CauseAction implements FoldableAction, RunAction2 {
      * @deprecated since 2009-02-28
      */
     @Deprecated
+    @XStreamDeserializable
     // there can be multiple causes, so this is deprecated
     private transient Cause cause;
 
     /** @deprecated JENKINS-33467 inefficient */
     @Deprecated
+    @XStreamDeserializable
     private transient List<Cause> causes;
 
-    private Map<Cause,Integer> causeBag = new LinkedHashMap<>();
+    private Map<Cause, Integer> causeBag = new LinkedHashMap<>();
 
     public CauseAction(Cause c) {
         this.causeBag.put(c, 1);
@@ -61,10 +64,10 @@ public class CauseAction implements FoldableAction, RunAction2 {
 
     private void addCause(Cause c) {
         synchronized (causeBag) {
-            Integer cnt = causeBag.get(c);
-            causeBag.put(c, cnt == null ? 1 : cnt + 1);
+            causeBag.compute(c, (unused, cnt) -> cnt == null ? 1 : cnt + 1);
         }
     }
+
     private void addCauses(Collection<? extends Cause> causes) {
         for (Cause cause : causes) {
             addCause(cause);
@@ -91,10 +94,10 @@ public class CauseAction implements FoldableAction, RunAction2 {
      *         to create an action with multiple causes use either of the constructors that support this;
      *         to append causes retroactively to a build you must create a new {@link CauseAction} and replace the old
      */
-    @Exported(visibility=2)
+    @Exported(visibility = 2)
     public List<Cause> getCauses() {
         List<Cause> r = new ArrayList<>();
-        for (Map.Entry<Cause,Integer> entry : causeBag.entrySet()) {
+        for (Map.Entry<Cause, Integer> entry : causeBag.entrySet()) {
             r.addAll(Collections.nCopies(entry.getValue(), entry.getKey()));
         }
         return Collections.unmodifiableList(r);
@@ -110,15 +113,18 @@ public class CauseAction implements FoldableAction, RunAction2 {
         return null;
     }
 
+    @Override
     public String getDisplayName() {
         return "Cause";
     }
 
+    @Override
     public String getIconFileName() {
         // no icon
         return null;
     }
 
+    @Override
     public String getUrlName() {
         return "cause";
     }
@@ -127,7 +133,7 @@ public class CauseAction implements FoldableAction, RunAction2 {
      * Get list of causes with duplicates combined into counters.
      * @return Map of Cause to number of occurrences of that Cause
      */
-    public Map<Cause,Integer> getCauseCounts() {
+    public Map<Cause, Integer> getCauseCounts() {
         return Collections.unmodifiableMap(causeBag);
     }
 
@@ -143,7 +149,7 @@ public class CauseAction implements FoldableAction, RunAction2 {
         return causeBag.keySet().iterator().next().getShortDescription();
     }
 
-    @Override public void onLoad(Run<?,?> owner) {
+    @Override public void onLoad(Run<?, ?> owner) {
         for (Cause c : causeBag.keySet()) {
             if (c != null) {
                 c.onLoad(owner);
@@ -154,7 +160,7 @@ public class CauseAction implements FoldableAction, RunAction2 {
     /**
      * When hooked up to build, notify {@link Cause}s.
      */
-    @Override public void onAttached(Run<?,?> owner) {
+    @Override public void onAttached(Run<?, ?> owner) {
         for (Cause c : causeBag.keySet()) {
             if (c != null) {
                 c.onAddedTo(owner);
@@ -162,9 +168,10 @@ public class CauseAction implements FoldableAction, RunAction2 {
         }
     }
 
+    @Override
     public void foldIntoExisting(hudson.model.Queue.Item item, Task owner, List<Action> otherActions) {
         CauseAction existing = item.getAction(CauseAction.class);
-        if (existing!=null) {
+        if (existing != null) {
             existing.addCauses(getCauses());
             return;
         }
@@ -174,6 +181,7 @@ public class CauseAction implements FoldableAction, RunAction2 {
 
     public static class ConverterImpl extends XStream2.PassthruConverter<CauseAction> {
         public ConverterImpl(XStream2 xstream) { super(xstream); }
+
         @Override protected void callback(CauseAction ca, UnmarshallingContext context) {
             // if we are being read in from an older version
             if (ca.cause != null) {

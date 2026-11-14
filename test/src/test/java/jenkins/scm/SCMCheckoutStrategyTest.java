@@ -1,37 +1,41 @@
 package jenkins.scm;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import hudson.model.AbstractBuild.AbstractBuildExecution;
+import hudson.model.AbstractProject;
 import hudson.model.FreeStyleProject;
 import hudson.model.Item;
-
-import org.junit.Rule;
-import org.junit.Test;
+import java.io.IOException;
+import org.htmlunit.html.HtmlPage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.TestExtension;
-import hudson.model.AbstractProject;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
-import hudson.model.AbstractBuild.AbstractBuildExecution;
 import org.xml.sax.SAXException;
-
-import java.io.IOException;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class SCMCheckoutStrategyTest {
+@WithJenkins
+class SCMCheckoutStrategyTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
 
     @Test
-    public void configRoundtrip1() throws Exception {
-        assertEquals(1,SCMCheckoutStrategyDescriptor.all().size());
+    void configRoundtrip1() throws Exception {
+        assertEquals(1, SCMCheckoutStrategyDescriptor.all().size());
         FreeStyleProject p = j.createFreeStyleProject();
         assertFalse(pageHasUI(p));   // no configuration UI because there's only one option
     }
@@ -40,19 +44,29 @@ public class SCMCheckoutStrategyTest {
      * This should show the UI.
      */
     @Test
-    public void configRoundtrip2() throws Exception {
-        assertEquals(2,SCMCheckoutStrategyDescriptor.all().size());
+    void configRoundtrip2() throws Exception {
+        assertEquals(2, SCMCheckoutStrategyDescriptor.all().size());
         FreeStyleProject p = j.createFreeStyleProject();
         System.out.println(SCMCheckoutStrategyDescriptor.all());
 
         TestSCMCheckoutStrategy before = new TestSCMCheckoutStrategy();
         p.setScmCheckoutStrategy(before);
-        j.configRoundtrip((Item)p);
+        j.configRoundtrip((Item) p);
         SCMCheckoutStrategy after = p.getScmCheckoutStrategy();
-        assertNotSame(before,after);
+        assertNotSame(before, after);
         assertSame(before.getClass(), after.getClass());
 
         assertTrue(pageHasUI(p));
+    }
+
+    @Test
+    void configWithoutSCMCheckoutStrategy() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject();
+        p.setScmCheckoutStrategy(null);
+        j.configRoundtrip((Item) p);
+        SCMCheckoutStrategy after = p.getScmCheckoutStrategy();
+        assertEquals(DefaultSCMCheckoutStrategyImpl.class, after.getClass());
+        assertFalse(pageHasUI(p));
     }
 
     private boolean pageHasUI(FreeStyleProject p) throws IOException, SAXException {
@@ -62,6 +76,7 @@ public class SCMCheckoutStrategyTest {
 
     @SuppressWarnings("rawtypes")
     public static class TestSCMCheckoutStrategy extends SCMCheckoutStrategy {
+        @SuppressWarnings("checkstyle:redundantmodifier")
         @DataBoundConstructor
         public TestSCMCheckoutStrategy() {
         }

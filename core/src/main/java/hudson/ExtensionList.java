@@ -21,53 +21,45 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.init.InitMilestone;
 import hudson.model.Hudson;
-import jenkins.ExtensionComponentSet;
-import jenkins.model.Jenkins;
 import hudson.util.AdaptedIterator;
-import hudson.util.DescriptorList;
 import hudson.util.Iterators;
-import hudson.ExtensionPoint.LegacyInstancesAreScopedToHudson;
-
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Vector;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
+import jenkins.ExtensionComponentSet;
+import jenkins.model.Jenkins;
 import jenkins.util.io.OnMaster;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Retains the known extension instances for the given type 'T'.
  *
  * <p>
- * Extensions are loaded lazily on demand and automatically by using {@link ExtensionFinder}, but this
- * class also provides a mechanism to provide compatibility with the older {@link DescriptorList}-based
- * manual registration,
- *
- * <p>
- * All {@link ExtensionList} instances should be owned by {@link jenkins.model.Jenkins}, even though
- * extension points can be defined by anyone on any type. Use {@link jenkins.model.Jenkins#getExtensionList(Class)}
- * and {@link jenkins.model.Jenkins#getDescriptorList(Class)} to obtain the instances.
+ * Use {@link Extension} to register extensions.
+ * Use {@link #lookup}, {@link #lookupSingleton}, or {@link #lookupFirst} to find them.
  *
  * @param <T>
- *      Type of the extension point. This class holds instances of the subtypes of 'T'. 
+ *      Type of the extension point. This class holds instances of the subtypes of 'T'.
  *
  * @author Kohsuke Kawaguchi
  * @since 1.286
- * @see jenkins.model.Jenkins#getExtensionList(Class)
- * @see jenkins.model.Jenkins#getDescriptorList(Class)
  */
 public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
     /**
@@ -88,7 +80,7 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
     private final List<ExtensionListListener> listeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Place to store manually registered instances with the per-Hudson scope.
+     * Place to store manually registered instances.
      * {@link CopyOnWriteArrayList} is used here to support concurrent iterations and mutation.
      */
     private final CopyOnWriteArrayList<ExtensionComponent<T>> legacyInstances;
@@ -99,31 +91,28 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
      */
     @Deprecated
     protected ExtensionList(Hudson hudson, Class<T> extensionType) {
-        this((Jenkins)hudson,extensionType);
+        this((Jenkins) hudson, extensionType);
     }
 
     protected ExtensionList(Jenkins jenkins, Class<T> extensionType) {
-        this(jenkins,extensionType, new CopyOnWriteArrayList<>());
+        this(jenkins, extensionType, new CopyOnWriteArrayList<>());
     }
 
     /**
      * @deprecated as of 1.416
-     *      Use {@link #ExtensionList(Jenkins, Class, CopyOnWriteArrayList)}
+     *      Use {@link #ExtensionList(Jenkins, Class)}
      */
     @Deprecated
     protected ExtensionList(Hudson hudson, Class<T> extensionType, CopyOnWriteArrayList<ExtensionComponent<T>> legacyStore) {
-        this((Jenkins)hudson,extensionType,legacyStore);
+        this((Jenkins) hudson, extensionType, legacyStore);
     }
 
     /**
-     *
-     * @param legacyStore
-     *      Place to store manually registered instances. The version of the constructor that
-     *      omits this uses a new {@link Vector}, making the storage lifespan tied to the life of  {@link ExtensionList}.
-     *      If the manually registered instances are scoped to VM level, the caller should pass in a static list. 
+     * @deprecated {@link #ExtensionList(Jenkins, Class)} should suffice
      */
+    @Deprecated
     protected ExtensionList(Jenkins jenkins, Class<T> extensionType, CopyOnWriteArrayList<ExtensionComponent<T>> legacyStore) {
-        this.hudson = (Hudson)jenkins;
+        this.hudson = (Hudson) jenkins;
         this.jenkins = jenkins;
         this.extensionType = extensionType;
         this.legacyInstances = legacyStore;
@@ -146,7 +135,7 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
      */
     public @CheckForNull <U extends T> U get(@NonNull Class<U> type) {
         for (T ext : this)
-            if(ext.getClass()==type)
+            if (ext.getClass() == type)
                 return type.cast(ext);
         return null;
     }
@@ -154,21 +143,22 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
     /**
      * Looks for the extension instance of the given type (subclasses excluded),
      * or throws an IllegalStateException.
-     * 
+     *
      * Meant to simplify call inside @Extension annotated class to retrieve their own instance.
      */
     public @NonNull <U extends T> U getInstance(@NonNull Class<U> type) throws IllegalStateException {
         for (T ext : this)
-            if(ext.getClass()==type)
+            if (ext.getClass() == type)
                 return type.cast(ext);
-        
+
         throw new IllegalStateException("The class " + type.getName() + " was not found, potentially not yet loaded");
     }
 
     @Override
     public @NonNull Iterator<T> iterator() {
-        // we need to intercept mutation, so for now don't allow Iterator.remove 
-        return new AdaptedIterator<ExtensionComponent<T>,T>(Iterators.readOnly(ensureLoaded().iterator())) {
+        // we need to intercept mutation, so for now don't allow Iterator.remove
+        return new AdaptedIterator<>(Iterators.readOnly(ensureLoaded().iterator())) {
+            @Override
             protected T adapt(ExtensionComponent<T> item) {
                 return item.getInstance();
             }
@@ -182,10 +172,12 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
         return Collections.unmodifiableList(ensureLoaded());
     }
 
+    @Override
     public T get(int index) {
         return ensureLoaded().get(index).getInstance();
     }
-    
+
+    @Override
     public int size() {
         return ensureLoaded().size();
     }
@@ -194,10 +186,10 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
      * Gets the read-only view of this {@link ExtensionList} where components are reversed.
      */
     public List<T> reverseView() {
-        return new AbstractList<T>() {
+        return new AbstractList<>() {
             @Override
             public T get(int index) {
-                return ExtensionList.this.get(size()-index-1);
+                return ExtensionList.this.get(size() - index - 1);
             }
 
             @Override
@@ -212,7 +204,7 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
         try {
             return removeSync(o);
         } finally {
-            if(extensions!=null) {
+            if (extensions != null) {
                 fireOnChangeListeners();
             }
         }
@@ -235,15 +227,15 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
 
     private synchronized boolean removeSync(Object o) {
         boolean removed = removeComponent(legacyInstances, o);
-        if(extensions!=null) {
+        if (extensions != null) {
             List<ExtensionComponent<T>> r = new ArrayList<>(extensions);
-            removed |= removeComponent(r,o);
+            removed |= removeComponent(r, o);
             extensions = sort(r);
         }
         return removed;
     }
 
-    private <T> boolean removeComponent(Collection<ExtensionComponent<T>> collection, Object t) {
+    private boolean removeComponent(Collection<ExtensionComponent<T>> collection, Object t) {
         for (ExtensionComponent<T> c : collection) {
             if (c.getInstance().equals(t)) {
                 return collection.remove(c);
@@ -271,7 +263,7 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
         try {
             return addSync(t);
         } finally {
-            if(extensions!=null) {
+            if (extensions != null) {
                 fireOnChangeListeners();
             }
         }
@@ -280,7 +272,7 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
     private synchronized boolean addSync(T t) {
         legacyInstances.add(new ExtensionComponent<>(t));
         // if we've already filled extensions, add it
-        if(extensions!=null) {
+        if (extensions != null) {
             List<ExtensionComponent<T>> r = new ArrayList<>(extensions);
             r.add(new ExtensionComponent<>(t));
             extensions = sort(r);
@@ -306,13 +298,13 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
     }
 
     private List<ExtensionComponent<T>> ensureLoaded() {
-        if(extensions!=null)
+        if (extensions != null)
             return extensions; // already loaded
         if (jenkins == null || jenkins.getInitLevel().compareTo(InitMilestone.PLUGINS_PREPARED) < 0)
             return legacyInstances; // can't perform the auto discovery until all plugins are loaded, so just make the legacy instances visible
 
         synchronized (getLoadLock()) {
-            if(extensions==null) {
+            if (extensions == null) {
                 List<ExtensionComponent<T>> r = load();
                 r.addAll(legacyInstances);
                 extensions = sort(r);
@@ -325,37 +317,54 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
      * Chooses the object that locks the loading of the extension instances.
      */
     protected Object getLoadLock() {
-        return jenkins.lookup.setIfNull(Lock.class,new Lock());
+        return Objects.requireNonNull(jenkins).lookup.setIfNull(Lock.class, new Lock());
     }
 
     /**
      * Used during {@link Jenkins#refreshExtensions()} to add new components into existing {@link ExtensionList}s.
      * Do not call from anywhere else.
+     * @return true if {@link #fireOnChangeListeners} should be called on {@code this} after all lists have been refreshed.
      */
-    public void refresh(ExtensionComponentSet delta) {
-        boolean fireOnChangeListeners = false;
+    @Restricted(NoExternalUse.class)
+    public boolean refresh(ExtensionComponentSet delta) {
         synchronized (getLoadLock()) {
-            if (extensions==null)
-                return;     // not yet loaded. when we load it, we'll load everything visible by then, so no work needed
+            if (extensions == null)
+                return false;     // not yet loaded. when we load it, we'll load everything visible by then, so no work needed
 
-            Collection<ExtensionComponent<T>> found = load(delta);
-            if (!found.isEmpty()) {
-                List<ExtensionComponent<T>> l = new ArrayList<>(extensions);
-                l.addAll(found);
-                extensions = sort(l);
-                fireOnChangeListeners = true;
+            Collection<ExtensionComponent<T>> newComponents = load(delta);
+            if (!newComponents.isEmpty()) {
+                // We check to ensure that we do not insert duplicate instances of already-loaded extensions into the list.
+                // This can happen when dynamically loading a plugin with an extension A that itself loads another
+                // extension B from the same plugin in some contexts, such as in A's constructor or via a method in A called
+                // by an ExtensionListListener. In those cases, ExtensionList.refresh may be called on a list that already
+                // includes the new extensions. Note that ExtensionComponent objects are always unique, even when
+                // ExtensionComponent.getInstance is identical, so we have to track the components and instances separately
+                // to handle ordinal sorting and check for dupes.
+                List<ExtensionComponent<T>> components = new ArrayList<>(extensions);
+                Set<T> instances = Collections.newSetFromMap(new IdentityHashMap<>());
+                for (ExtensionComponent<T> component : components) {
+                    instances.add(component.getInstance());
+                }
+                boolean fireListeners = false;
+                for (ExtensionComponent<T> newComponent : newComponents) {
+                    if (instances.add(newComponent.getInstance())) {
+                        fireListeners = true;
+                        components.add(newComponent);
+                    }
+                }
+                extensions = sort(new ArrayList<>(components));
+                return fireListeners;
             }
         }
-        if (fireOnChangeListeners) {
-            fireOnChangeListeners();
-        }
+        return false;
     }
 
-    private void fireOnChangeListeners() {
+    @Restricted(NoExternalUse.class)
+    public void fireOnChangeListeners() {
         for (ExtensionListListener listener : listeners) {
             try {
                 listener.onChange();
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 LOGGER.log(Level.SEVERE, "Error firing ExtensionListListener.onChange().", e);
             }
         }
@@ -377,7 +386,7 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
             LOGGER.log(Level.FINER, String.format("Loading ExtensionList '%s' from", extensionType.getName()), new Throwable("Only present for stacktrace information"));
         }
 
-        return jenkins.getPluginManager().getPluginStrategy().findComponents(extensionType, hudson);
+        return Objects.requireNonNull(jenkins).getPluginManager().getPluginStrategy().findComponents(extensionType, hudson);
     }
 
     /**
@@ -407,16 +416,12 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
      */
     @Deprecated
     public static <T> ExtensionList<T> create(Hudson hudson, Class<T> type) {
-        return create((Jenkins)hudson,type);
+        return create((Jenkins) hudson, type);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static <T> ExtensionList<T> create(Jenkins jenkins, Class<T> type) {
-        if(type.getAnnotation(LegacyInstancesAreScopedToHudson.class)!=null)
-            return new ExtensionList<>(jenkins, type);
-        else {
-            return new ExtensionList(jenkins, type, staticLegacyInstances.computeIfAbsent(type, key -> new CopyOnWriteArrayList()));
-        }
+        return new ExtensionList<>(jenkins, type);
     }
 
     /**
@@ -446,23 +451,45 @@ public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
      */
     public static @NonNull <U> U lookupSingleton(Class<U> type) {
         ExtensionList<U> all = lookup(type);
-        if (all.size() != 1) {
+        if (Main.isUnitTest && all.isEmpty()) {
+            throw new IllegalStateException("Found no instances of " + type.getName() +
+                " registered (possible annotation processor issue); try using `mvn clean test -Dtest=…` rather than an IDE test runner");
+        } else if (all.size() != 1) {
             throw new IllegalStateException("Expected 1 instance of " + type.getName() + " but got " + all.size());
         }
-        return all.get(0);
+        return all.getFirst();
     }
 
     /**
-     * Places to store static-scope legacy instances.
+     * Convenience method allowing lookup of the instance of a given type with the highest ordinal.
+     * Equivalent to {@code ExtensionList.lookup(type).get(0)} if there is at least one instance,
+     * and throws an {@link IllegalStateException} otherwise if no instance could be found.
+     *
+     * @param type The type to look up.
+     * @return the singleton instance of the given type in its list.
+     * @throws IllegalStateException if there are no instances
+     *
+     * @since 2.435
      */
-    @SuppressWarnings("rawtypes")
-    private static final Map<Class, CopyOnWriteArrayList> staticLegacyInstances = new ConcurrentHashMap<>();
+    public static @NonNull <U> U lookupFirst(Class<U> type) {
+        var all = lookup(type);
+        if (!all.isEmpty()) {
+            return all.getFirst();
+        } else {
+            if (Main.isUnitTest) {
+                throw new IllegalStateException("Found no instances of " + type.getName() +
+                        " registered (possible annotation processor issue); try using `mvn clean test -Dtest=…` rather than an IDE test runner");
+            } else {
+                throw new IllegalStateException("Found no instances of " + type.getName() + " registered");
+            }
+        }
+    }
 
     /**
-     * Exposed for the test harness to clear all legacy extension instances.
+     * @deprecated No longer does anything.
      */
+    @Deprecated
     public static void clearLegacyInstances() {
-        staticLegacyInstances.clear();
     }
 
     private static final Logger LOGGER = Logger.getLogger(ExtensionList.class.getName());

@@ -21,90 +21,93 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson;
 
-import hudson.MarkupText.SubText;
-import org.junit.jupiter.api.Test;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import hudson.MarkupText.SubText;
 import java.util.List;
 import java.util.regex.Pattern;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class MarkupTextTest {
+class MarkupTextTest {
 
     @Test
-    public void test1() {
+    void test1() {
         MarkupText t = new MarkupText("I fixed issue #155. The rest is trick text: xissue #155 issue #123x");
         for (SubText st : t.findTokens(pattern)) {
             assertEquals(1, st.groupCount());
-            st.surroundWith("<$1>","<$1>");
+            st.surroundWith("<$1>", "<$1>");
         }
 
         assertEquals("I fixed <155>issue #155<155>. The rest is trick text: xissue #155 issue #123x", t.toString(false));
     }
 
     @Test
-    public void boundary() {
+    void boundary() {
         MarkupText t = new MarkupText("issue #155---issue #123");
         for (SubText st : t.findTokens(pattern))
-            st.surroundWith("<$1>","<$1>");
+            st.surroundWith("<$1>", "<$1>");
 
         assertEquals("<155>issue #155<155>---<123>issue #123<123>", t.toString(false));
     }
 
     @Test
-    public void findTokensOnSubText() {
+    void findTokensOnSubText() {
         MarkupText t = new MarkupText("Fixed 2 issues in this commit, fixing issue 155, 145");
         List<SubText> tokens = t.findTokens(Pattern.compile("issue .*"));
         assertEquals(1, tokens.size(), "Expected one token");
-        assertEquals("issue 155, 145", tokens.get(0).group(0), "Expected single token was incorrect");
-        for (SubText st : tokens.get(0).findTokens(Pattern.compile("([0-9]+)")))
-            st.surroundWith("<$1>","<$1>");
+        assertEquals("issue 155, 145", tokens.getFirst().group(0), "Expected single token was incorrect");
+        for (SubText st : tokens.getFirst().findTokens(Pattern.compile("([0-9]+)")))
+            st.surroundWith("<$1>", "<$1>");
 
         assertEquals("Fixed 2 issues in this commit, fixing issue <155>155<155>, <145>145<145>", t.toString(false));
     }
 
     @Test
-    public void literalTextSurround() {
+    void literalTextSurround() {
         MarkupText text = new MarkupText("AAA test AAA");
-        for(SubText token : text.findTokens(Pattern.compile("AAA"))) {
-            token.surroundWithLiteral("$9","$9");
+        for (SubText token : text.findTokens(Pattern.compile("AAA"))) {
+            token.surroundWithLiteral("$9", "$9");
         }
-        assertEquals("$9AAA$9 test $9AAA$9",text.toString(false));
+        assertEquals("$9AAA$9 test $9AAA$9", text.toString(false));
     }
 
     /**
      * Start/end tag nesting should be correct regardless of the order tags are added.
      */
     @Test
-    public void adjacent() {
+    void addMarkupInOrder() {
         MarkupText text = new MarkupText("abcdef");
-        text.addMarkup(0,3,"$","$");
-        text.addMarkup(3,6,"#","#");
-        assertEquals("$abc$#def#",text.toString(false));
-
-        text = new MarkupText("abcdef");
-        text.addMarkup(3,6,"#","#");
-        text.addMarkup(0,3,"$","$");
-        assertEquals("$abc$#def#",text.toString(false));
+        text.addMarkup(0, 3, "$", "$");
+        text.addMarkup(3, 6, "#", "#");
+        assertEquals("$abc$#def#", text.toString(false));
     }
 
     @Test
-    public void escape() {
+    void addMarkupInReversedOrder() {
+        MarkupText text = new MarkupText("abcdef");
+        text.addMarkup(3, 6, "#", "#");
+        text.addMarkup(0, 3, "$", "$");
+        assertEquals("$abc$#def#", text.toString(false));
+    }
+
+    @Test
+    void escape() {
         MarkupText text = new MarkupText("&&&");
-        assertEquals("&amp;&amp;&amp;",text.toString(false));
+        assertEquals("&amp;&amp;&amp;", text.toString(false));
 
-        text.addMarkup(1,"<foo>");
-        text.addMarkup(2,"&nbsp;");
-        assertEquals("&amp;<foo>&amp;&nbsp;&amp;",text.toString(false));
+        text.addMarkup(1, "<foo>");
+        text.addMarkup(2, "&nbsp;");
+        assertEquals("&amp;<foo>&amp;&nbsp;&amp;", text.toString(false));
     }
 
     @Test
-    public void preEscape() {
+    void preEscape() {
         MarkupText text = new MarkupText("Line\n2   & 3\n<End>\n");
         assertEquals("Line\n2   &amp; 3\n&lt;End&gt;\n", text.toString(true));
         text.addMarkup(4, "<hr/>");
@@ -113,7 +116,7 @@ public class MarkupTextTest {
 
     /* @Issue("JENKINS-6252") */
     @Test
-    public void subTextSubText() {
+    void subTextSubText() {
         MarkupText text = new MarkupText("abcdefgh");
         SubText sub = text.subText(2, 7);
         assertEquals("cdefg", sub.getText());

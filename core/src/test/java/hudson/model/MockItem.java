@@ -21,10 +21,10 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
 import hudson.model.queue.CauseOfBlockage;
-
 import java.util.Collections;
 import java.util.List;
 
@@ -34,7 +34,7 @@ import java.util.List;
 public class MockItem extends Queue.Item {
 
     public MockItem(long id) {
-        super(null, Collections.emptyList(), id, null);
+        super(new MockQueueTask(), Collections.emptyList(), id, null);
     }
 
     public MockItem(Queue.Task task) {
@@ -66,5 +66,32 @@ public class MockItem extends Queue.Item {
     @Override
     boolean leave(Queue q) {
         return true;
+    }
+
+    private static class MockQueueTask implements Queue.Task {
+        @Override
+        public String getDisplayName() {
+            return null;
+        }
+
+        @Override
+        public String getName() {
+            return null;
+        }
+
+        @Override
+        public String getFullDisplayName() {
+            return null;
+        }
+
+        @Override
+        public String getUrl() {
+            return null;
+        }
+
+        @Override
+        public Queue.Executable createExecutable() {
+            return null;
+        }
     }
 }

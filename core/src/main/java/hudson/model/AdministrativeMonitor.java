@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,25 +21,23 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import hudson.ExtensionPoint;
-import hudson.ExtensionList;
 import hudson.Extension;
-import hudson.ExtensionPoint.LegacyInstancesAreScopedToHudson;
+import hudson.ExtensionList;
+import hudson.ExtensionPoint;
 import hudson.security.Permission;
 import hudson.triggers.SCMTrigger;
 import hudson.triggers.TimerTrigger;
-
-import java.util.Set;
 import java.io.IOException;
-
+import java.util.Set;
 import jenkins.model.Jenkins;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.StaplerProxy;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.StaplerRequest2;
+import org.kohsuke.stapler.StaplerResponse2;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
@@ -68,10 +66,11 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * <dd>
  * If {@link #isActivated()} returns true, Jenkins will use the {@code message.jelly}
  * view of this object to render the warning text. This happens in the
- * {@code http://SERVER/jenkins/manage} page. This view should typically render
- * a DIV box with class='alert alert-danger' or class='alert alert-warning' with a human-readable text
- * inside it. It often also contains a link to a page that provides more details
- * about the problem.
+ * {@code http://SERVER/jenkins/manage} page. This view should use {@code l:adminMonitor}
+ * to display the warning text in a consistent way.
+ * <br>
+ * Additionally 2 numbers are shown in the Jenkins header of administrators, one with the number or active
+ * non-security relevant monitors and one with the number of active security relevant monitors.
  * </dd>
  * </dl>
  *
@@ -87,7 +86,6 @@ import org.kohsuke.stapler.interceptor.RequirePOST;
  * @since 1.273
  * @see Jenkins#administrativeMonitors
  */
-@LegacyInstancesAreScopedToHudson
 public abstract class AdministrativeMonitor extends AbstractModelObject implements ExtensionPoint, StaplerProxy {
     /**
      * Human-readable ID of this monitor, which needs to be unique within the system.
@@ -110,13 +108,15 @@ public abstract class AdministrativeMonitor extends AbstractModelObject implemen
      * Returns the URL of this monitor, relative to the context path, like "administrativeMonitor/foobar".
      */
     public String getUrl() {
-        return "administrativeMonitor/"+id;
+        return "administrativeMonitor/" + id;
     }
 
+    @Override
     public String getDisplayName() {
         return id;
     }
 
+    @Override
     public final String getSearchUrl() {
         return getUrl();
     }
@@ -157,6 +157,11 @@ public abstract class AdministrativeMonitor extends AbstractModelObject implemen
      */
     public abstract boolean isActivated();
 
+    @Restricted(NoExternalUse.class)
+    public boolean isActivationFake() {
+        return false;
+    }
+
     /**
      * Returns true if this monitor is security related.
      *
@@ -172,20 +177,23 @@ public abstract class AdministrativeMonitor extends AbstractModelObject implemen
      * URL binding to disable this monitor.
      */
     @RequirePOST
-    public void doDisable(StaplerRequest req, StaplerResponse rsp) throws IOException {
+    public void doDisable(StaplerRequest2 req, StaplerResponse2 rsp) throws IOException {
         Jenkins.get().checkPermission(Jenkins.ADMINISTER);
         disable(true);
-        rsp.sendRedirect2(req.getContextPath()+"/manage");
+        rsp.sendRedirect2(req.getContextPath() + "/manage");
     }
 
     /**
      * Required permission to view this admin monitor.
-     * By default {@link Jenkins#ADMINISTER}, but {@link Jenkins#SYSTEM_READ} is also supported.
+     * By default {@link Jenkins#ADMINISTER}, but {@link Jenkins#SYSTEM_READ} or {@link Jenkins#MANAGE} are also supported.
      * <p>
      *     Changing this permission check to return {@link Jenkins#SYSTEM_READ} will make the active
-     *     administrative monitor appear on {@code manage.jelly} and on the globally visible
-     *     {@link jenkins.management.AdministrativeMonitorsDecorator} to users without Administer permission.
-     *     {@link #doDisable(StaplerRequest, StaplerResponse)} will still always require Administer permission.
+     *     administrative monitor appear on {@link ManageJenkinsAction} to users without Administer permission.
+     *     {@link #doDisable(StaplerRequest2, StaplerResponse2)} will still always require Administer permission.
+     * </p>
+     * <p>
+     *     This method only allows for a single permission to be returned. If more complex permission checks are required,
+     *     override {@link #checkRequiredPermission()} and {@link #hasRequiredPermission()} instead.
      * </p>
      * <p>
      *     Implementers need to ensure that {@code doAct} and other web methods perform necessary permission checks:
@@ -193,17 +201,60 @@ public abstract class AdministrativeMonitor extends AbstractModelObject implemen
      *     Form UI elements that change system state, e.g. toggling a feature on or off, need to be hidden from users
      *     lacking Administer permission.
      * </p>
+     * @since 2.233
+     * @deprecated Callers should use {@link #checkRequiredPermission()} or {@link #hasRequiredPermission()}.
      */
+    @Deprecated
     public Permission getRequiredPermission() {
         return Jenkins.ADMINISTER;
     }
 
     /**
+     * Checks if the current user has the minimum required permission to view this administrative monitor.
+     * <p>
+     * Subclasses may override this method and {@link #hasRequiredPermission()} instead of {@link #getRequiredPermission()} to perform more complex permission checks,
+     * for example, checking either {@link Jenkins#MANAGE} or {@link Jenkins#SYSTEM_READ}.
+     * </p>
+     * @see #getRequiredPermission()
+     * @see #hasRequiredPermission()
+     * @since 2.468
+     */
+    public void checkRequiredPermission() {
+        Jenkins.get().checkPermission(getRequiredPermission());
+    }
+
+    /**
+     * Checks if the current user has the minimum required permission to view this administrative monitor.
+     * <p>
+     * Subclasses may override this method and {@link #checkRequiredPermission} instead of {@link #getRequiredPermission()} to perform more complex permission checks,
+     * for example, checking either {@link Jenkins#MANAGE} or {@link Jenkins#SYSTEM_READ}.
+     * </p>
+     * @see #getRequiredPermission()
+     * @see #checkRequiredPermission()
+     * @since 2.468
+     */
+    public boolean hasRequiredPermission() {
+        return Jenkins.get().hasPermission(getRequiredPermission());
+    }
+
+    /**
+     * Checks if the current user has the minimum required permission to view any administrative monitor.
+     *
+     * @return true if the current user has the minimum required permission to view any administrative monitor.
+     *
+     * @since 2.468
+     */
+    public static boolean hasPermissionToDisplay() {
+        return Jenkins.get().hasAnyPermission(Jenkins.SYSTEM_READ, Jenkins.MANAGE);
+    }
+
+    /**
      * Ensure that URLs in this administrative monitor are only accessible to users with {@link #getRequiredPermission()}.
      */
+    @Override
     @Restricted(NoExternalUse.class)
     public Object getTarget() {
-        Jenkins.get().checkPermission(getRequiredPermission());
+        checkRequiredPermission();
         return this;
     }
 

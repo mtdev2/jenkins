@@ -22,19 +22,24 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
 import com.infradna.tool.bridge_method_injector.WithBridgeMethods;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import hudson.Extension;
+import hudson.BulkChange;
 import hudson.ExtensionPoint;
 import hudson.FilePath;
 import hudson.FileSystemProvisioner;
 import hudson.Launcher;
 import hudson.Util;
+import hudson.XmlFile;
 import hudson.model.Descriptor.FormException;
 import hudson.model.Queue.Task;
 import hudson.model.labels.LabelAtom;
+import hudson.model.listeners.SaveableListener;
 import hudson.model.queue.CauseOfBlockage;
 import hudson.remoting.Callable;
 import hudson.remoting.VirtualChannel;
@@ -42,6 +47,7 @@ import hudson.security.ACL;
 import hudson.security.AccessControlled;
 import hudson.slaves.Cloud;
 import hudson.slaves.ComputerListener;
+import hudson.slaves.EphemeralNode;
 import hudson.slaves.NodeDescriptor;
 import hudson.slaves.NodeProperty;
 import hudson.slaves.NodePropertyDescriptor;
@@ -50,8 +56,10 @@ import hudson.util.ClockDifference;
 import hudson.util.DescribableList;
 import hudson.util.EnumConverter;
 import hudson.util.TagCloud;
+import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Type;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -59,18 +67,21 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import edu.umd.cs.findbugs.annotations.CheckForNull;
-import edu.umd.cs.findbugs.annotations.NonNull;
 import jenkins.model.Jenkins;
+import jenkins.model.Nodes;
+import jenkins.security.XStreamNotDeserializable;
+import jenkins.util.Listeners;
 import jenkins.util.SystemProperties;
 import jenkins.util.io.OnMaster;
 import net.sf.json.JSONObject;
 import org.jvnet.localizer.Localizable;
 import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.accmod.restrictions.ProtectedExternally;
 import org.kohsuke.stapler.BindInterceptor;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 import org.springframework.security.core.Authentication;
@@ -94,24 +105,30 @@ import org.springframework.security.core.Authentication;
  * @see Computer
  */
 @ExportedBean
-public abstract class Node extends AbstractModelObject implements ReconfigurableDescribable<Node>, ExtensionPoint, AccessControlled, OnMaster, Saveable {
+public abstract class Node extends AbstractModelObject implements ReconfigurableDescribable<Node>, ExtensionPoint, AccessControlled, OnMaster, PersistenceRoot {
 
     private static final Logger LOGGER = Logger.getLogger(Node.class.getName());
 
-    /** @see <a href="https://issues.jenkins-ci.org/browse/JENKINS-46652">JENKINS-46652</a> */
-    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    /** @see <a href="https://issues.jenkins.io/browse/JENKINS-46652">JENKINS-46652</a> */
+    @SuppressFBWarnings(value = "MS_SHOULD_BE_FINAL", justification = "for script console")
     public static /* not final */ boolean SKIP_BUILD_CHECK_ON_FLYWEIGHTS = SystemProperties.getBoolean(Node.class.getName() + ".SKIP_BUILD_CHECK_ON_FLYWEIGHTS", true);
 
     /**
      * Newly copied agents get this flag set, so that Jenkins doesn't try to start/remove this node until its configuration
      * is saved once.
      */
+    @XStreamNotDeserializable
     protected transient volatile boolean holdOffLaunchUntilSave;
 
+    @XStreamNotDeserializable
+    private transient Nodes parent;
+
+    @Override
     public String getDisplayName() {
         return getNodeName(); // default implementation
     }
 
+    @Override
     public String getSearchUrl() {
         Computer c = toComputer();
         if (c != null) {
@@ -125,20 +142,23 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
     }
 
     /**
+     * In most cases, you should not call this method directly, but {@link Jenkins#updateNode(Node)} instead.
      * @since 1.635.
      */
     @Override
     public void save() throws IOException {
-        // this should be a no-op unless this node instance is the node instance in Jenkins' list of nodes
-        // thus where Jenkins.get() == null there is no list of nodes, so we do a no-op
-        // Nodes.updateNode(n) will only persist the node record if the node instance is in the list of nodes
-        // so either path results in the same behaviour: the node instance is only saved if it is in the list of nodes
-        // for all other cases we do not know where to persist the node record and hence we follow the default
-        // no-op of a Saveable.NOOP
-        final Jenkins jenkins = Jenkins.getInstanceOrNull();
-        if (jenkins != null) {
-            jenkins.updateNode(this);
+        if (parent == null) return;
+        if (this instanceof EphemeralNode) {
+            Util.deleteRecursive(getRootDir());
+            return;
         }
+        if (BulkChange.contains(this))   return;
+        getConfigFile().write(this);
+        SaveableListener.fireOnChange(this, getConfigFile());
+    }
+
+    protected XmlFile getConfigFile() {
+        return parent.getConfigFile(this);
     }
 
     /**
@@ -147,7 +167,7 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
      * @return
      *      "" if this is master
      */
-    @Exported(visibility=999)
+    @Exported(visibility = 999)
     @NonNull
     public abstract String getNodeName();
 
@@ -216,13 +236,13 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
     @CheckForNull
     public final VirtualChannel getChannel() {
         Computer c = toComputer();
-        return c==null ? null : c.getChannel();
+        return c == null ? null : c.getChannel();
     }
 
     /**
      * Creates a new {@link Computer} object that acts as the UI peer of this {@link Node}.
-     * 
-     * Nobody but {@link Jenkins#updateComputerList()} should call this method.
+     *
+     * Nobody but {@link Jenkins#updateComputerList(boolean, Collection)} should call this method.
      * @return Created instance of the computer.
      *         Can be {@code null} if the {@link Node} implementation does not support it (e.g. {@link Cloud} agent).
      */
@@ -244,39 +264,49 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
         return true;
     }
 
-    /**
-     * Let Nodes be aware of the lifecycle of their own {@link Computer}.
-     */
-    @Extension
-    public static class InternalComputerListener extends ComputerListener {
-        @Override
-        public void onOnline(Computer c, TaskListener listener) {
-            Node node = c.getNode();
-
-            // At startup, we need to restore any previously in-effect temp offline cause.
-            // We wait until the computer is started rather than getting the data to it sooner
-            // so that the normal computer start up processing works as expected.
-            if (node!= null && node.temporaryOfflineCause != null && node.temporaryOfflineCause != c.getOfflineCause()) {
-                c.setTemporarilyOffline(true, node.temporaryOfflineCause);
-            }
-        }
+    public void onLoad(Nodes parent, String name) {
+        this.parent = parent;
+        setNodeName(name);
     }
 
-    private OfflineCause temporaryOfflineCause;
+    /**
+     * @return true if this node has a temporary offline cause set.
+     */
+    boolean isTemporarilyOffline() {
+        return temporaryOfflineCause != null;
+    }
+
+    private volatile OfflineCause temporaryOfflineCause;
 
     /**
      * Enable a {@link Computer} to inform its node when it is taken
      * temporarily offline.
      */
-    void setTemporaryOfflineCause(OfflineCause cause) {
+    @Restricted(NoExternalUse.class)
+    public void setTemporaryOfflineCause(OfflineCause cause) {
         try {
             if (temporaryOfflineCause != cause) {
                 temporaryOfflineCause = cause;
-                save();
+                Jenkins.get().updateNode(this);
+            }
+            if (temporaryOfflineCause != null) {
+                Listeners.notify(ComputerListener.class, false, l -> l.onTemporarilyOffline(toComputer(), temporaryOfflineCause));
+            } else {
+                Listeners.notify(ComputerListener.class, false, l -> l.onTemporarilyOnline(toComputer()));
             }
         } catch (java.io.IOException e) {
             LOGGER.warning("Unable to complete save, temporary offline status will not be persisted: " + e.getMessage());
         }
+    }
+
+    /**
+     * Get the cause if temporary offline.
+     *
+     * @return null if not temporary offline or there was no cause given.
+     * @since 2.340
+     */
+    public OfflineCause getTemporaryOfflineCause() {
+        return temporaryOfflineCause;
     }
 
     /**
@@ -285,6 +315,17 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
     public TagCloud<LabelAtom> getLabelCloud() {
         return new TagCloud<>(getAssignedLabels(), Label::getTiedJobCount);
     }
+
+    /**
+     * @return An immutable set of LabelAtom associated with the current node label.
+     */
+    @NonNull
+    @Restricted(NoExternalUse.class)
+    protected Set<LabelAtom> getLabelAtomSet() {
+        // Default implementation doesn't cache, since we can't hook on label updates.
+        return Collections.unmodifiableSet(Label.parse(getLabelString()));
+    }
+
     /**
      * Returns the possibly empty set of labels that are assigned to this node,
      * including the automatic {@link #getSelfLabel() self label}, manually
@@ -292,22 +333,31 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
      * {@link LabelFinder} extension point.
      *
      * This method has a side effect of updating the hudson-wide set of labels
-     * and should be called after events that will change that - e.g. a agent
+     * and should be called after events that will change that - e.g. an agent
      * connecting.
      */
+
     @Exported
     public Set<LabelAtom> getAssignedLabels() {
-        Set<LabelAtom> r = Label.parse(getLabelString());
+        Set<LabelAtom> r = new HashSet<>(getLabelAtomSet());
         r.add(getSelfLabel());
         r.addAll(getDynamicLabels());
         return Collections.unmodifiableSet(r);
     }
 
     /**
+     * @return the labels to be trimmed for this node.
+     */
+    @NonNull
+    @Restricted(NoExternalUse.class)
+    public Set<LabelAtom> drainLabelsToTrim() {
+        return new HashSet<>(getAssignedLabels());
+    }
+
+    /**
      * Return all the labels assigned dynamically to this node.
      * This calls all the LabelFinder implementations with the node converts
      * the results into Labels.
-     * @return HashSet<Label>.
      */
     private HashSet<LabelAtom> getDynamicLabels() {
         HashSet<LabelAtom> result = new HashSet<>();
@@ -315,7 +365,7 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
             // Filter out any bad(null) results from plugins
             // for compatibility reasons, findLabels may return LabelExpression and not atom.
             for (Label label : labeler.findLabels(this))
-                if (label instanceof LabelAtom) result.add((LabelAtom)label);
+                if (label instanceof LabelAtom) result.add((LabelAtom) label);
         }
         return result;
     }
@@ -380,10 +430,10 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
      */
     public CauseOfBlockage canTake(Queue.BuildableItem item) {
         Label l = item.getAssignedLabel();
-        if(l!=null && !l.contains(this))
+        if (l != null && !l.contains(this))
             return CauseOfBlockage.fromMessage(Messages._Node_LabelMissing(getDisplayName(), l));   // the task needs to be executed on label that this node doesn't have.
 
-        if(l==null && getMode()== Mode.EXCLUSIVE) {
+        if (l == null && getMode() == Mode.EXCLUSIVE) {
             // flyweight tasks need to get executed somewhere, if every node
             if (!(item.task instanceof Queue.FlyweightTask && (
                     this instanceof Jenkins
@@ -403,7 +453,7 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
 
         // Check each NodeProperty to see whether they object to this node
         // taking the task
-        for (NodeProperty prop: getNodeProperties()) {
+        for (NodeProperty prop : getNodeProperties()) {
             CauseOfBlockage c;
             try {
                 c = prop.canTake(item);
@@ -412,7 +462,7 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
                 LOGGER.log(Level.WARNING, t, () -> String.format("Exception evaluating if the node '%s' can take the task '%s'", getNodeName(), item.task.getName()));
                 c = CauseOfBlockage.fromMessage(Messages._Queue_ExceptionCanTake());
             }
-            if (c!=null)    return c;
+            if (c != null)    return c;
         }
 
         if (!isAcceptingTasks()) {
@@ -454,8 +504,8 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
      */
     public @CheckForNull FilePath createPath(String absolutePath) {
         VirtualChannel ch = getChannel();
-        if(ch==null)    return null;    // offline
-        return new FilePath(ch,absolutePath);
+        if (ch == null)    return null;    // offline
+        return new FilePath(ch, absolutePath);
     }
 
     @Deprecated
@@ -470,43 +520,43 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
 
     /**
      * Gets the specified property or null if the property is not configured for this Node.
-     * 
+     *
      * @param clazz the type of the property
-     * 
+     *
      * @return null if the property is not configured
-     * 
+     *
      * @since 2.37
      */
     @CheckForNull
     public <T extends NodeProperty> T getNodeProperty(Class<T> clazz)
     {
-        for (NodeProperty p: getNodeProperties()) {
+        for (NodeProperty p : getNodeProperties()) {
             if (clazz.isInstance(p)) {
                 return clazz.cast(p);
             }
         }
-        return null;      
+        return null;
     }
 
     /**
-     * Gets the property from the given classname or null if the property 
+     * Gets the property from the given classname or null if the property
      * is not configured for this Node.
-     * 
+     *
      * @param className The classname of the property
-     * 
+     *
      * @return null if the property is not configured
-     * 
+     *
      * @since 2.37
      */
     @CheckForNull
     public NodeProperty getNodeProperty(String className)
     {
-        for (NodeProperty p: getNodeProperties()) {
+        for (NodeProperty p : getNodeProperties()) {
             if (p.getClass().getName().equals(className)) {
                 return p;
             }
         }
-        return null;      
+        return null;
     }
 
     // used in the Jelly script to expose descriptors
@@ -514,12 +564,32 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
         return NodeProperty.for_(this);
     }
 
+    @NonNull
+    @Override
     public ACL getACL() {
         return Jenkins.get().getAuthorizationStrategy().getACL(this);
     }
 
-    public Node reconfigure(final StaplerRequest req, JSONObject form) throws FormException {
-        if (form==null)     return null;
+    @Override
+    public Node reconfigure(@NonNull final StaplerRequest2 req, JSONObject form) throws FormException {
+        if (Util.isOverridden(Node.class, getClass(), "reconfigure", StaplerRequest.class, JSONObject.class)) {
+            return reconfigure(StaplerRequest.fromStaplerRequest2(req), form);
+        } else {
+            return reconfigureImpl(req, form);
+        }
+    }
+
+    /**
+     * @deprecated use {@link #reconfigure(StaplerRequest2, JSONObject)}
+     */
+    @Deprecated
+    @Override
+    public Node reconfigure(@NonNull final StaplerRequest req, JSONObject form) throws FormException {
+        return reconfigureImpl(StaplerRequest.toStaplerRequest2(req), form);
+    }
+
+    private Node reconfigureImpl(@NonNull final StaplerRequest2 req, JSONObject form) throws FormException {
+        if (form == null)     return null;
 
         final JSONObject jsonForProperties = form.optJSONObject("nodeProperties");
         final AtomicReference<BindInterceptor> old = new AtomicReference<>();
@@ -547,6 +617,7 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
         }
     }
 
+    @Override
     public abstract NodeDescriptor getDescriptor();
 
     /**
@@ -559,8 +630,8 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
      */
     public ClockDifference getClockDifference() throws IOException, InterruptedException {
         VirtualChannel channel = getChannel();
-        if(channel==null)
-            throw new IOException(getNodeName()+" is offline");
+        if (channel == null)
+            throw new IOException(getNodeName() + " is offline");
 
         return channel.call(getClockDifferenceCallable());
     }
@@ -572,7 +643,7 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
      *      always non-null.
      * @since 1.522
      */
-    public abstract Callable<ClockDifference,IOException> getClockDifferenceCallable();
+    public abstract Callable<ClockDifference, IOException> getClockDifferenceCallable();
 
     /**
      * Constants that control how Hudson allocates jobs to agents.
@@ -600,4 +671,16 @@ public abstract class Node extends AbstractModelObject implements Reconfigurable
         }
     }
 
+    @Override
+    public File getRootDir() {
+        return getParent().getRootDirFor(this);
+    }
+
+    @NonNull
+    private Nodes getParent() {
+        if (parent == null) {
+            throw new IllegalStateException("no parent set on " + getClass().getName() + "[" + getNodeName() + "]");
+        }
+        return parent;
+    }
 }

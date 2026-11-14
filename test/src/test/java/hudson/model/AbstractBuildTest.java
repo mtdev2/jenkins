@@ -21,10 +21,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import com.gargoylesoftware.htmlunit.Page;
-import com.gargoylesoftware.htmlunit.WebResponse;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import hudson.EnvVars;
 import hudson.Functions;
 import hudson.Launcher;
@@ -34,83 +43,81 @@ import hudson.slaves.WorkspaceList;
 import hudson.tasks.BatchFile;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Builder;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
-
-import static org.hamcrest.Matchers.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assert.assertTrue;
-
 import hudson.tasks.LogRotatorTest;
 import hudson.tasks.Recorder;
 import hudson.tasks.Shell;
 import hudson.util.OneShotEvent;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
-import org.junit.ClassRule;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.BuildWatcher;
+import org.htmlunit.Page;
+import org.htmlunit.WebResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.CaptureEnvironmentBuilder;
 import org.jvnet.hudson.test.FailureBuilder;
 import org.jvnet.hudson.test.FakeChangeLogSCM;
 import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.LogRecorder;
 import org.jvnet.hudson.test.TestBuilder;
 import org.jvnet.hudson.test.TestExtension;
 import org.jvnet.hudson.test.UnstableBuilder;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.xml.sax.SAXException;
 
 /**
  * Unit tests of {@link AbstractBuild}.
  */
-public class AbstractBuildTest {
+@WithJenkins
+class AbstractBuildTest {
 
-    @ClassRule
-    public static BuildWatcher buildWatcher = new BuildWatcher();
-    
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
-    
+    private final LogRecorder logging = new LogRecorder();
+
+    private JenkinsRule j;
+
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
+    }
+
     @Test
     @Issue("JENKINS-30730")
-    public void reportErrorShouldNotFailForNonPublisherClass() throws Exception {
+    void reportErrorShouldNotFailForNonPublisherClass() throws Exception {
         FreeStyleProject prj = j.createFreeStyleProject();
         ErroneousJobProperty erroneousJobProperty = new ErroneousJobProperty();
         prj.addProperty(erroneousJobProperty);
-        QueueTaskFuture<FreeStyleBuild> future = prj.scheduleBuild2(0);     
+        QueueTaskFuture<FreeStyleBuild> future = prj.scheduleBuild2(0);
         assertThat("Build should be actually scheduled by Jenkins", future, notNullValue());
         FreeStyleBuild build = future.get();
         j.assertLogContains(ErroneousJobProperty.ERROR_MESSAGE, build);
         j.assertLogNotContains(ClassCastException.class.getName(), build);
     }
-    
+
     /**
      * Job property, which always fails with an exception.
      */
     public static class ErroneousJobProperty extends JobProperty<FreeStyleProject> {
 
         public static final String ERROR_MESSAGE = "This publisher fails by design";
-        
+
         @Override
-        public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+        public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws IOException {
             throw new IOException(ERROR_MESSAGE);
         }
-        
+
         @TestExtension("reportErrorShouldNotFailForNonPublisherClass")
         public static class DescriptorImpl extends JobPropertyDescriptor {}
     }
 
     @Test
-    public void variablesResolved() throws Exception {
+    void variablesResolved() throws Exception {
         FreeStyleProject project = j.createFreeStyleProject();
         j.jenkins.getNodeProperties().add(new EnvironmentVariablesNodeProperty(new EnvironmentVariablesNodeProperty.Entry("KEY1", "value"), new EnvironmentVariablesNodeProperty.Entry("KEY2", "$KEY1")));
         CaptureEnvironmentBuilder builder = new CaptureEnvironmentBuilder();
@@ -118,21 +125,21 @@ public class AbstractBuildTest {
 
         j.buildAndAssertSuccess(project);
 
-		EnvVars envVars = builder.getEnvVars();
-		assertEquals("value", envVars.get("KEY1"));
-		assertEquals("value", envVars.get("KEY2"));
-	}
+        EnvVars envVars = builder.getEnvVars();
+        assertEquals("value", envVars.get("KEY1"));
+        assertEquals("value", envVars.get("KEY2"));
+    }
 
     /**
      * Makes sure that raw console output doesn't get affected by XML escapes.
      */
     @Test
-    public void rawConsoleOutput() throws Exception {
+    void rawConsoleOutput() throws Exception {
         final String out = "<test>&</test>";
 
         FreeStyleProject p = j.createFreeStyleProject();
         p.getBuildersList().add(new TestBuilder() {
-            @Override public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+            @Override public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) {
                 listener.getLogger().println(out);
                 return true;
             }
@@ -142,7 +149,7 @@ public class AbstractBuildTest {
         assertThat(rsp.getWebResponse().getContentAsString(), containsString(out));
     }
 
-    private void assertCulprits(AbstractBuild<?,?> b, String... expectedIds) throws IOException, SAXException {
+    private void assertCulprits(AbstractBuild<?, ?> b, String... expectedIds) throws IOException, SAXException {
         Set<String> actual = new TreeSet<>();
         for (User u : b.getCulprits()) {
             actual.add(u.getId());
@@ -156,13 +163,13 @@ public class AbstractBuildTest {
 
             Object culpritsArray = json.get("culprits");
             assertNotNull(culpritsArray);
-            assertTrue(culpritsArray instanceof JSONArray);
+            assertThat(culpritsArray, instanceOf(JSONArray.class));
             Set<String> fromApi = new TreeSet<>();
-            for (Object o : ((JSONArray)culpritsArray).toArray()) {
-                assertTrue(o instanceof JSONObject);
-                Object id = ((JSONObject)o).get("id");
+            for (Object o : ((JSONArray) culpritsArray).toArray()) {
+                assertThat(o, instanceOf(JSONObject.class));
+                Object id = ((JSONObject) o).get("id");
                 if (id instanceof String) {
-                    fromApi.add((String)id);
+                    fromApi.add((String) id);
                 }
             }
             assertEquals(fromApi, new TreeSet<>(Arrays.asList(expectedIds)));
@@ -170,7 +177,7 @@ public class AbstractBuildTest {
     }
 
     @Test
-    public void culprits() throws Exception {
+    void culprits() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         FakeChangeLogSCM scm = new FakeChangeLogSCM();
         p.setScm(scm);
@@ -185,7 +192,7 @@ public class AbstractBuildTest {
         // 2nd build
         scm.addChange().withAuthor("bob");
         p.getBuildersList().add(new FailureBuilder());
-        b = j.assertBuildStatus(Result.FAILURE, p.scheduleBuild2(0).get());
+        b = j.buildAndAssertStatus(Result.FAILURE, p);
         assertCulprits(b, "bob");
 
         // 3rd build. bob continues to be in culprit
@@ -202,13 +209,13 @@ public class AbstractBuildTest {
 
         // 4th build, unstable. culprit list should continue
         scm.addChange().withAuthor("dave");
-        p.getBuildersList().replaceBy(Collections.singleton(new UnstableBuilder()));
-        b = j.assertBuildStatus(Result.UNSTABLE, p.scheduleBuild2(0).get());
+        p.getBuildersList().replaceBy(Set.of(new UnstableBuilder()));
+        b = j.buildAndAssertStatus(Result.UNSTABLE, p);
         assertCulprits(b, "bob", "charlie", "dave");
 
         // 5th build, unstable. culprit list should continue
         scm.addChange().withAuthor("eve");
-        b = j.assertBuildStatus(Result.UNSTABLE, p.scheduleBuild2(0).get());
+        b = j.buildAndAssertStatus(Result.UNSTABLE, p);
         assertCulprits(b, "bob", "charlie", "dave", "eve");
 
         // 6th build, success, accumulation continues up to this point
@@ -225,7 +232,7 @@ public class AbstractBuildTest {
 
     @Issue("JENKINS-19920")
     @Test
-    public void lastBuildNextBuild() throws Exception {
+    void lastBuildNextBuild() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         FreeStyleBuild b1 = j.buildAndAssertSuccess(p);
         FreeStyleBuild b2 = j.buildAndAssertSuccess(p);
@@ -238,54 +245,55 @@ public class AbstractBuildTest {
     }
 
     @Test
-    public void doNotInterruptBuildAbruptlyWhenExceptionThrownFromBuildStep() throws Exception {
+    void doNotInterruptBuildAbruptlyWhenExceptionThrownFromBuildStep() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         p.getBuildersList().add(new ThrowBuilder());
-        FreeStyleBuild build = p.scheduleBuild2(0).get();
-        j.assertBuildStatus(Result.FAILURE, build);
+        FreeStyleBuild build = j.buildAndAssertStatus(Result.FAILURE, p);
         j.assertLogContains("Finished: FAILURE", build);
         j.assertLogContains("Build step 'ThrowBuilder' marked build as failure", build);
     }
 
     @Test
-    public void fixEmptyDisplayName() throws Exception {
+    void fixEmptyDisplayName() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject("foo");
         p.setDisplayName("");
-        assertEquals("An empty display name should be ignored.", "foo", p.getDisplayName());
+        assertEquals("foo", p.getDisplayName(), "An empty display name should be ignored.");
     }
 
     @Test
-    public void fixBlankDisplayName() throws Exception {
+    void fixBlankDisplayName() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject("foo");
         p.setDisplayName(" ");
-        assertEquals("A blank display name should be ignored.", "foo", p.getDisplayName());
+        assertEquals("foo", p.getDisplayName(), "A blank display name should be ignored.");
     }
 
     @Test
-    public void validDisplayName() throws Exception {
+    void validDisplayName() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject("foo");
         p.setDisplayName("bar");
-        assertEquals("A non-blank display name should be used.", "bar", p.getDisplayName());
+        assertEquals("bar", p.getDisplayName(), "A non-blank display name should be used.");
     }
 
     @Test
-    public void trimValidDisplayName() throws Exception {
+    void trimValidDisplayName() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject("foo");
         p.setDisplayName("    bar    ");
-        assertEquals("A non-blank display name with whitespace should be trimmed.", "bar", p.getDisplayName());
+        assertEquals("bar", p.getDisplayName(), "A non-blank display name with whitespace should be trimmed.");
     }
 
     private static class ThrowBuilder extends Builder {
-        @Override public boolean perform(AbstractBuild<?,?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+        @Override public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) {
             throw new NullPointerException();
         }
+
         @TestExtension("doNotInterruptBuildAbruptlyWhenExceptionThrownFromBuildStep")
         public static class DescriptorImpl extends Descriptor<Builder> {}
     }
 
     @Test
     @Issue("JENKINS-10615")
-    public void workspaceLock() throws Exception {
+    void workspaceLock() throws Exception {
+        logging.record(Run.class, Level.FINER);
         FreeStyleProject p = j.createFreeStyleProject();
         p.setConcurrentBuild(true);
         OneShotEvent e1 = new OneShotEvent();
@@ -299,18 +307,20 @@ public class AbstractBuildTest {
             }
 
             @Override
-            public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+            public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException {
                 if (build.number == 1) {
                     e1.signal();  // signal that build #1 is in publisher
+                } else if (build.number == 2) {
+                    e2.signal();  // signal that build #2 is in publisher
                 } else {
-                    assert build.number == 2;
-                    e2.signal();
+                    throw new IllegalArgumentException("unexpected build number: " + build.number);
                 }
 
                 done.block();
 
                 return true;
             }
+
             private Object writeReplace() {
                 return new Object();
             }
@@ -327,11 +337,15 @@ public class AbstractBuildTest {
         assertNotEquals(b1.getStartCondition().get().getWorkspace(), b2.getStartCondition().get().getWorkspace());
 
         done.signal();
+        Logger.getLogger(AbstractBuildTest.class.getName()).info("Test done, letting builds complete…");
+        j.waitForCompletion(b1.get());
+        j.waitForCompletion(b2.get());
+        Logger.getLogger(AbstractBuildTest.class.getName()).info("…done.");
     }
 
     @Test
     @Issue("JENKINS-60634")
-    public void tempDirVariable() throws Exception {
+    void tempDirVariable() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject();
         if (Functions.isWindows()) {
             p.getBuildersList().add(new BatchFile("mkdir \"%WORKSPACE_TMP%\"\r\necho ok > \"%WORKSPACE_TMP%\\x\""));

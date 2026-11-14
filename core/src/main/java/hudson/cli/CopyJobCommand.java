@@ -21,19 +21,20 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.cli;
 
-import jenkins.model.Jenkins;
-import hudson.model.TopLevelItem;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
 import hudson.model.Item;
+import hudson.model.TopLevelItem;
+import jenkins.model.Jenkins;
 import jenkins.model.ModifiableTopLevelItemGroup;
 import org.kohsuke.args4j.Argument;
 
-
 /**
  * Copies a job from CLI.
- * 
+ *
  * @author Kohsuke Kawaguchi
  */
 @Extension
@@ -43,17 +44,19 @@ public class CopyJobCommand extends CLICommand {
         return Messages.CopyJobCommand_ShortDescription();
     }
 
-    @Argument(metaVar="SRC",usage="Name of the job to copy",required=true)
+    @Argument(metaVar = "SRC", usage = "Name of the job to copy", required = true)
     public TopLevelItem src;
 
-    @Argument(metaVar="DST",usage="Name of the new job to be created.",index=1,required=true)
+    @Argument(metaVar = "DST", usage = "Name of the new job to be created.", index = 1, required = true)
+    @SuppressFBWarnings(value = "PA_PUBLIC_PRIMITIVE_ATTRIBUTE", justification = "Preserve API compatibility")
     public String dst;
 
+    @Override
     protected int run() throws Exception {
         Jenkins jenkins = Jenkins.get();
 
-        if (jenkins.getItemByFullName(dst)!=null) {
-            throw new IllegalStateException("Job '"+dst+"' already exists");
+        if (jenkins.getItemByFullName(dst) != null) {
+            throw new IllegalStateException("Job '" + dst + "' already exists");
         }
 
         ModifiableTopLevelItemGroup ig = jenkins;
@@ -73,8 +76,7 @@ public class CopyJobCommand extends CLICommand {
             dst = dst.substring(i + 1);
         }
 
-        ig.copy(src,dst).save();
+        ig.copy(src, dst).save();
         return 0;
     }
 }
-

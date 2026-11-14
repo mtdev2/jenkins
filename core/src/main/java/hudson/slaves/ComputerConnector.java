@@ -21,14 +21,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.slaves;
 
-import hudson.ExtensionPoint;
-import hudson.model.AbstractDescribableImpl;
-import hudson.model.TaskListener;
-
-import java.io.IOException;
 import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.ExtensionPoint;
+import hudson.model.Describable;
+import hudson.model.TaskListener;
+import java.io.IOException;
 
 /**
  * Factory of {@link ComputerLauncher}.
@@ -40,19 +40,19 @@ import edu.umd.cs.findbugs.annotations.NonNull;
  * @since 1.383
  * @see ComputerLauncher
  */
-public abstract class ComputerConnector extends AbstractDescribableImpl<ComputerConnector> implements ExtensionPoint {
+public abstract class ComputerConnector implements Describable<ComputerConnector>, ExtensionPoint {
     /**
      * Creates a {@link ComputerLauncher} for connecting to the given host.
      *
      * @param host
      *      The host name / IP address of the machine to connect to.
      * @param listener
-     *      If 
+     *      If
      */
     public abstract ComputerLauncher launch(@NonNull String host, TaskListener listener) throws IOException, InterruptedException;
 
     @Override
     public ComputerConnectorDescriptor getDescriptor() {
-        return (ComputerConnectorDescriptor)super.getDescriptor();
+        return (ComputerConnectorDescriptor) Describable.super.getDescriptor();
     }
 }

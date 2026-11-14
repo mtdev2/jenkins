@@ -21,13 +21,17 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
 import hudson.DescriptorExtensionList;
 import hudson.ExtensionPoint;
+import hudson.Util;
 import jenkins.model.Jenkins;
+import jenkins.security.XStreamNotDeserializable;
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerRequest2;
 
 /**
  * Extensible property of {@link View}.
@@ -52,21 +56,38 @@ public class ViewProperty implements ReconfigurableDescribable<ViewProperty>, Ex
      * This value will be set by the core code.
      * Derived classes can expect this value to be always set.
      */
+    @XStreamNotDeserializable
     protected transient View view;
 
     /*package*/ final void setView(View view) {
         this.view = view;
     }
 
+    @Override
     public ViewPropertyDescriptor getDescriptor() {
         return (ViewPropertyDescriptor) Jenkins.get().getDescriptorOrDie(getClass());
     }
 
-    public static DescriptorExtensionList<ViewProperty,ViewPropertyDescriptor> all() {
+    public static DescriptorExtensionList<ViewProperty, ViewPropertyDescriptor> all() {
         return Jenkins.get().getDescriptorList(ViewProperty.class);
     }
 
+    @Override
+    public ViewProperty reconfigure(StaplerRequest2 req, JSONObject form) throws Descriptor.FormException {
+        if (Util.isOverridden(ViewProperty.class, getClass(), "reconfigure", StaplerRequest.class, JSONObject.class)) {
+            return reconfigure(StaplerRequest.fromStaplerRequest2(req), form);
+        } else {
+            return reconfigureImpl(req, form);
+        }
+    }
+
+    @Deprecated
+    @Override
     public ViewProperty reconfigure(StaplerRequest req, JSONObject form) throws Descriptor.FormException {
-    	return form==null ? null : getDescriptor().newInstance(req, form);
+        return reconfigureImpl(StaplerRequest.toStaplerRequest2(req), form);
+    }
+
+    private ViewProperty reconfigureImpl(StaplerRequest2 req, JSONObject form) throws Descriptor.FormException {
+        return form == null ? null : getDescriptor().newInstance(req, form);
     }
 }

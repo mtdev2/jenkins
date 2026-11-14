@@ -21,108 +21,116 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.cli;
-
-import hudson.Functions;
-import hudson.cli.CLICommand;
-import hudson.cli.CLICommandInvoker;
-import hudson.model.FreeStyleProject;
-import hudson.model.Item;
-import hudson.tasks.BatchFile;
-import hudson.tasks.Builder;
-import hudson.tasks.Shell;
-import jenkins.model.Jenkins;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-import org.jvnet.hudson.test.MockAuthorizationStrategy;
-
-import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
 
 import static java.util.Arrays.asList;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.core.IsEqual.equalTo;
+import static org.hamcrest.Matchers.equalTo;
 
-public class StopBuildsCommandTest {
+import hudson.cli.CLICommand;
+import hudson.cli.CLICommandInvoker;
+import hudson.model.FreeStyleBuild;
+import hudson.model.FreeStyleProject;
+import hudson.model.Item;
+import hudson.model.Result;
+import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import jenkins.model.Jenkins;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.MockAuthorizationStrategy;
+import org.jvnet.hudson.test.SleepBuilder;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+@WithJenkins
+class StopBuildsCommandTest {
 
     private static final String TEST_JOB_NAME = "jobName";
     private static final String TEST_JOB_NAME_2 = "jobName2";
     private static final String LN = System.lineSeparator();
 
-    @Test
-    public void shouldStopLastBuild() throws Exception {
-        final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME);
-        project.scheduleBuild2(0).waitForStart();
-        final String stdout = runWith(Collections.singletonList(TEST_JOB_NAME)).stdout();
+    private JenkinsRule j;
 
-        assertThat(stdout, equalTo("Build '#1' stopped for job 'jobName'" + LN));
-
-        waitForLastBuildToStop(project);
+    @BeforeEach
+    void setUp(JenkinsRule rule) {
+        j = rule;
     }
 
     @Test
-    public void shouldNotStopEndedBuild() throws Exception {
-        final FreeStyleProject project = j.createFreeStyleProject(TEST_JOB_NAME);
-        project.getBuildersList().add(createScriptBuilder("echo 1"));
-        project.scheduleBuild2(0).waitForStart();
-        waitForLastBuildToStop(project);
+    void shouldStopLastBuild() throws Exception {
+        final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME);
+        FreeStyleBuild build = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", build);
+        final String stdout = runWith(List.of(TEST_JOB_NAME)).stdout();
 
-        final String out = runWith(Collections.singletonList(TEST_JOB_NAME)).stdout();
+        assertThat(stdout, equalTo("Build '#1' stopped for job 'jobName'" + LN));
+
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(build));
+    }
+
+    @Test
+    void shouldNotStopEndedBuild() throws Exception {
+        final FreeStyleProject project = j.createFreeStyleProject(TEST_JOB_NAME);
+        project.getBuildersList().add(new SleepBuilder(TimeUnit.SECONDS.toMillis(1)));
+        j.buildAndAssertSuccess(project);
+
+        final String out = runWith(List.of(TEST_JOB_NAME)).stdout();
 
         assertThat(out, equalTo("No builds stopped" + LN));
     }
 
     @Test
-    public void shouldStopSeveralWorkingBuilds() throws Exception {
+    void shouldStopSeveralWorkingBuilds() throws Exception {
         final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME);
         project.setConcurrentBuild(true);
 
-        project.scheduleBuild2(0).waitForStart();
-        project.scheduleBuild2(0).waitForStart();
+        FreeStyleBuild b1 = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b1);
+        FreeStyleBuild b2 = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b2);
 
-        final String stdout = runWith(Collections.singletonList(TEST_JOB_NAME)).stdout();
+        final String stdout = runWith(List.of(TEST_JOB_NAME)).stdout();
 
         assertThat(stdout, equalTo("Build '#2' stopped for job 'jobName'" + LN +
                 "Build '#1' stopped for job 'jobName'" + LN));
-        waitForLastBuildToStop(project);
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b1));
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b2));
     }
 
     @Test
-    public void shouldReportNotSupportedType() throws Exception {
+    void shouldReportNotSupportedType() throws Exception {
         final String testFolderName = "folder";
         j.createFolder(testFolderName);
 
-        final String stderr = runWith(Collections.singletonList(testFolderName)).stderr();
+        final String stderr = runWith(List.of(testFolderName)).stderr();
 
         assertThat(stderr, equalTo(LN + "ERROR: Job not found: 'folder'" + LN));
     }
 
     @Test
-    public void shouldDoNothingIfJobNotFound() throws Exception {
-        final String stderr = runWith(Collections.singletonList(TEST_JOB_NAME)).stderr();
+    void shouldDoNothingIfJobNotFound() {
+        final String stderr = runWith(List.of(TEST_JOB_NAME)).stderr();
 
         assertThat(stderr, equalTo(LN + "ERROR: Job not found: 'jobName'" + LN));
     }
 
     @Test
-    public void shouldStopWorkingBuildsInSeveralJobs() throws Exception {
+    void shouldStopWorkingBuildsInSeveralJobs() throws Exception {
         final List<String> inputJobNames = asList(TEST_JOB_NAME, TEST_JOB_NAME_2);
         setupAndAssertTwoBuildsStop(inputJobNames);
     }
 
     @Test
-    public void shouldFilterJobDuplicatesInInput() throws Exception {
+    void shouldFilterJobDuplicatesInInput() throws Exception {
         final List<String> inputNames = asList(TEST_JOB_NAME, TEST_JOB_NAME, TEST_JOB_NAME_2);
         setupAndAssertTwoBuildsStop(inputNames);
     }
 
     @Test
-    public void shouldReportBuildStopError() throws Exception {
+    void shouldReportBuildStopError() throws Exception {
         final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME);
 
         j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
@@ -130,18 +138,22 @@ public class StopBuildsCommandTest {
                 grant(Jenkins.READ).everywhere().toEveryone().
                 grant(Item.READ).onItems(project).toEveryone().
                 grant(Item.CANCEL).onItems(project).toAuthenticated());
-        project.scheduleBuild2(0).waitForStart();
+        FreeStyleBuild build = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", build);
 
-        final String stdout = runWith(Collections.singletonList(TEST_JOB_NAME)).stdout();
+        final String stdout = runWith(List.of(TEST_JOB_NAME)).stdout();
 
         assertThat(stdout,
                 equalTo("Exception occurred while trying to stop build '#1' for job 'jobName'. " +
                         "Exception class: AccessDeniedException3, message: anonymous is missing the Job/Cancel permission" + LN +
                         "No builds stopped" + LN));
+
+        build.doStop();
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(build));
     }
 
     @Test
-    public void shouldStopSecondJobEvenIfFirstStopFailed() throws Exception {
+    void shouldStopSecondJobEvenIfFirstStopFailed() throws Exception {
         final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME_2);
 
         final FreeStyleProject restrictedProject = createLongRunningProject(TEST_JOB_NAME);
@@ -153,8 +165,10 @@ public class StopBuildsCommandTest {
                 grant(Item.CANCEL).onItems(restrictedProject).toAuthenticated().
                 grant(Item.CANCEL).onItems(project).toEveryone());
 
-        restrictedProject.scheduleBuild2(0).waitForStart();
-        project.scheduleBuild2(0).waitForStart();
+        FreeStyleBuild b1 = restrictedProject.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b1);
+        FreeStyleBuild b2 = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b2);
 
         final String stdout = runWith(asList(TEST_JOB_NAME, TEST_JOB_NAME_2)).stdout();
 
@@ -162,44 +176,62 @@ public class StopBuildsCommandTest {
                 equalTo("Exception occurred while trying to stop build '#1' for job 'jobName'. " +
                         "Exception class: AccessDeniedException3, message: anonymous is missing the Job/Cancel permission" + LN +
                         "Build '#1' stopped for job 'jobName2'" + LN));
+
+        b1.doStop();
+        b2.doStop();
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b1));
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b2));
     }
 
-    private CLICommandInvoker.Result runWith(final List<String> jobNames) throws Exception {
+    @Test
+    void shouldStopEarlierBuildsEvenIfLatestComplete() throws Exception {
+        final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME);
+        project.setConcurrentBuild(true);
+        j.jenkins.setNumExecutors(3);
+
+        FreeStyleBuild b1 = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b1);
+        FreeStyleBuild b2 = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b2);
+
+        project.getBuildersList().clear();
+        FreeStyleBuild b3 = j.buildAndAssertSuccess(project);
+
+        final String stdout = runWith(List.of(TEST_JOB_NAME)).stdout();
+
+        assertThat(stdout, equalTo("Build '#2' stopped for job 'jobName'" + LN +
+                "Build '#1' stopped for job 'jobName'" + LN));
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b1));
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b2));
+    }
+
+    private CLICommandInvoker.Result runWith(final List<String> jobNames) {
         CLICommand cmd = new StopBuildsCommand();
         CLICommandInvoker invoker = new CLICommandInvoker(j, cmd);
-        return invoker.invokeWithArgs(jobNames.toArray(new String[jobNames.size()]));
+        return invoker.invokeWithArgs(jobNames.toArray(new String[0]));
     }
 
     private void setupAndAssertTwoBuildsStop(final List<String> inputNames) throws Exception {
         final FreeStyleProject project = createLongRunningProject(TEST_JOB_NAME);
         final FreeStyleProject project2 = createLongRunningProject(TEST_JOB_NAME_2);
 
-        project.scheduleBuild2(0).waitForStart();
-        project2.scheduleBuild2(0).waitForStart();
+        FreeStyleBuild b1 = project.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b1);
+        FreeStyleBuild b2 = project2.scheduleBuild2(0).waitForStart();
+        j.waitForMessage("Sleeping", b2);
 
         final String stdout = runWith(inputNames).stdout();
 
         assertThat(stdout, equalTo("Build '#1' stopped for job 'jobName'" + LN +
                 "Build '#1' stopped for job 'jobName2'" + LN));
 
-        waitForLastBuildToStop(project);
-        waitForLastBuildToStop(project2);
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b1));
+        j.assertBuildStatus(Result.ABORTED, j.waitForCompletion(b2));
     }
 
     private FreeStyleProject createLongRunningProject(final String jobName) throws IOException {
         final FreeStyleProject project = j.createFreeStyleProject(jobName);
-        project.getBuildersList().add(createScriptBuilder("sleep 50000"));
+        project.getBuildersList().add(new SleepBuilder(Long.MAX_VALUE));
         return project;
-    }
-
-    private Builder createScriptBuilder(String script) {
-        return Functions.isWindows() ? new BatchFile(script) : new Shell(script);
-    }
-
-    private void waitForLastBuildToStop(final FreeStyleProject project) throws InterruptedException {
-        while (project.getLastBuild().isBuilding()) {
-            Thread.sleep(500);
-        }
-        assertThat(project.getLastBuild().isBuilding(), equalTo(false));
     }
 }

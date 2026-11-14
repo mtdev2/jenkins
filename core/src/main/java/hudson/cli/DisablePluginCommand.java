@@ -27,12 +27,11 @@ package hudson.cli;
 import hudson.Extension;
 import hudson.PluginWrapper;
 import hudson.lifecycle.RestartNotSupportedException;
+import java.io.PrintStream;
+import java.util.List;
 import jenkins.model.Jenkins;
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.Option;
-
-import java.io.PrintStream;
-import java.util.List;
 
 /**
  * Disable one or more installed plugins.
@@ -47,10 +46,11 @@ public class DisablePluginCommand extends CLICommand {
     @Option(name = "-restart", aliases = "-r", usage = "Restart Jenkins after disabling plugins.")
     private boolean restart;
 
-    @Option(name = "-strategy", aliases = "-s", metaVar = "strategy", usage = "How to process the dependent plugins. \n" +
-            "- none: if a mandatory dependent plugin exists and it is enabled, the plugin cannot be disabled (default value).\n" +
-            "- mandatory: all mandatory dependent plugins are also disabled, optional dependent plugins remain enabled.\n" +
-            "- all: all dependent plugins are also disabled, no matter if its dependency is optional or mandatory.")
+    @Option(name = "-strategy", aliases = "-s", metaVar = "strategy", usage = """
+            How to process the dependent plugins.
+            - none: if a mandatory dependent plugin exists and it is enabled, the plugin cannot be disabled (default value).
+            - mandatory: all mandatory dependent plugins are also disabled, optional dependent plugins remain enabled.
+            - all: all dependent plugins are also disabled, no matter if its dependency is optional or mandatory.""")
     private String strategy = PluginWrapper.PluginDisableStrategy.NONE.toString();
 
     @Option(name = "-quiet", aliases = "-q", usage = "Be quiet, print only the error messages")
@@ -83,7 +83,15 @@ public class DisablePluginCommand extends CLICommand {
         try {
             strategyToUse = PluginWrapper.PluginDisableStrategy.valueOf(strategy.toUpperCase());
         } catch (IllegalArgumentException iae) {
-            throw new IllegalArgumentException(hudson.cli.Messages.DisablePluginCommand_NoSuchStrategy(strategy, String.format("%s, %s, %s", PluginWrapper.PluginDisableStrategy.NONE, PluginWrapper.PluginDisableStrategy.MANDATORY, PluginWrapper.PluginDisableStrategy.ALL)));
+            throw new IllegalArgumentException(
+                    hudson.cli.Messages.DisablePluginCommand_NoSuchStrategy(
+                            strategy,
+                            String.format(
+                                    "%s, %s, %s",
+                                    PluginWrapper.PluginDisableStrategy.NONE,
+                                    PluginWrapper.PluginDisableStrategy.MANDATORY,
+                                    PluginWrapper.PluginDisableStrategy.ALL)),
+                    iae);
         }
 
         // disable...
@@ -124,7 +132,7 @@ public class DisablePluginCommand extends CLICommand {
             System.arraycopy(arguments, 0, newArgs, 1, arguments.length);
 
             String f = "%" + indent + "s" + format + "%n";
-            stdout.format(f, newArgs);
+            stdout.format(f, (Object[]) newArgs);
         }
     }
 
@@ -140,7 +148,7 @@ public class DisablePluginCommand extends CLICommand {
         }
 
         printIndented(indent, Messages.DisablePluginCommand_StatusMessage(oneResult.getPlugin(), oneResult.getStatus(), oneResult.getMessage()));
-        if (oneResult.getDependentsDisableStatus().size() > 0) {
+        if (!oneResult.getDependentsDisableStatus().isEmpty()) {
             indent += INDENT_SPACE;
             for (PluginWrapper.PluginDisableResult oneDependentResult : oneResult.getDependentsDisableStatus()) {
                 printResult(oneDependentResult, indent);
@@ -175,7 +183,7 @@ public class DisablePluginCommand extends CLICommand {
             return true;
         }
 
-        if (oneResult.getDependentsDisableStatus().size() > 0) {
+        if (!oneResult.getDependentsDisableStatus().isEmpty()) {
             for (PluginWrapper.PluginDisableResult oneDependentResult : oneResult.getDependentsDisableStatus()) {
                 if (restartIfNecessary(oneDependentResult)) {
                     return true;
@@ -214,13 +222,13 @@ public class DisablePluginCommand extends CLICommand {
      */
     private int getResultCode(PluginWrapper.PluginDisableResult result) {
         int returnCode = 0;
-        switch (result.getStatus()){
+        switch (result.getStatus()) {
             case NOT_DISABLED_DEPENDANTS:
                 returnCode = RETURN_CODE_NOT_DISABLED_DEPENDANTS;
                 break;
             case NO_SUCH_PLUGIN:
                 returnCode = RETURN_CODE_NO_SUCH_PLUGIN;
-                break; 
+                break;
             default:
                 for (PluginWrapper.PluginDisableResult oneDependentResult : result.getDependentsDisableStatus()) {
                     returnCode = getResultCode(oneDependentResult);

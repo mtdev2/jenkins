@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2009, Sun Microsystems, Inc., Kohsuke Kawaguchi, Michael B. Donohue
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -21,11 +21,15 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package hudson.model;
 
-import hudson.Functions;
-
 import edu.umd.cs.findbugs.annotations.CheckForNull;
+import hudson.Functions;
+import jenkins.model.menu.Group;
+import jenkins.model.menu.Semantic;
+import jenkins.model.menu.event.Event;
+import jenkins.model.menu.event.LinkEvent;
 
 /**
  * Object that contributes additional information, behaviors, and UIs to {@link ModelObject}
@@ -78,15 +82,18 @@ import edu.umd.cs.findbugs.annotations.CheckForNull;
  */
 public interface Action extends ModelObject {
     /**
-     * Gets the file name of the icon.
+     * Gets the name of the icon.
      *
      * @return
+     *      If the icon name is prefixed with "symbol-", a Jenkins Symbol
+     *      will be used.
+     *      <p>
      *      If just a file name (like "abc.gif") is returned, it will be
      *      interpreted as a file name inside {@code /images/24x24}.
      *      This is useful for using one of the stock images.
      *      <p>
      *      If an absolute file name that starts from '/' is returned (like
-     *      "/plugin/foo/abc.gif'), then it will be interpreted as a path
+     *      "/plugin/foo/abc.gif"), then it will be interpreted as a path
      *      from the context root of Jenkins. This is useful to pick up
      *      image files from a plugin.
      *      <p>
@@ -94,6 +101,7 @@ public interface Action extends ModelObject {
      *      but this can be used for actions that only contribute {@code floatBox.jelly}
      *      and no task list item. The other case where this is useful is
      *      to avoid showing links that require a privilege when the user is anonymous.
+     * @see <a href="https://www.jenkins.io/doc/developer/views/symbols/">Jenkins Symbols</a>
      * @see Functions#isAnonymous()
      * @see Functions#getIconFilePath(Action)
      */
@@ -107,6 +115,7 @@ public interface Action extends ModelObject {
      *
      * @return Can be null in case the action is hidden.
      */
+    @Override
     @CheckForNull String getDisplayName();
 
     /**
@@ -134,4 +143,52 @@ public interface Action extends ModelObject {
      * @see Functions#getActionUrl(String, Action)
      */
     @CheckForNull String getUrlName();
+
+    /**
+     * Returns the description for this action.
+     * This is displayed in dropdown menus.
+     *
+     * @return the description, or {@code null} if not set
+     */
+    default String getDescription() {
+        return null;
+    }
+
+    /**
+     * Returns the group that this item belongs to.
+     * The default implementation places the item in the menu group.
+     *
+     * @return the group of this item
+     */
+    default Group getGroup() {
+        return Group.IN_MENU;
+    }
+
+    /**
+     * Returns the event associated with this item.
+     * By default, this creates a link event pointing to the item's URL name.
+     *
+     * @return the event representing this item
+     */
+    default Event getEvent() {
+        return LinkEvent.of(getUrlName());
+    }
+
+    /**
+     * Returns the semantic information for this item.
+     *
+     * @return the semantic associated with this item, or {@code null} if none
+     */
+    default Semantic getSemantic() {
+        return null;
+    }
+
+    /**
+     * Indicates whether this item should be visible in a context menu for an {@link Actionable}.
+     *
+     * @return {@code true} if the item is shown in the context menu, {@code false} otherwise
+     */
+    default boolean isVisibleInContextMenu() {
+        return true;
+    }
 }

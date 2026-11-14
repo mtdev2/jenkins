@@ -21,40 +21,39 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 package jenkins.security;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 import hudson.security.HudsonPrivateSecurityRealm;
-import org.junit.Before;
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.jvnet.hudson.test.JenkinsRule;
-
-import java.io.IOException;
-
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThrows;
-import static org.junit.Assert.fail;
+import org.jvnet.hudson.test.junit.jupiter.WithJenkins;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 
 /**
  * Tests for {@link UserDetailsCache}.
  */
-public class UserDetailsCacheTest {
+@WithJenkins
+class UserDetailsCacheTest {
 
-    @Rule
-    public JenkinsRule j = new JenkinsRule();
+    private JenkinsRule j;
 
-    @Before
-    public void before() throws IOException {
+    @BeforeEach
+    void setUp(JenkinsRule rule) throws Exception {
+        j = rule;
         HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false, false, null);
         j.jenkins.setSecurityRealm(realm);
         realm.createAccount("alice", "veeerysecret");
     }
 
     @Test
-    public void getCachedTrue() throws Exception {
+    void getCachedTrue() throws Exception {
         UserDetailsCache cache = UserDetailsCache.get();
         assertNotNull(cache);
         UserDetails alice = cache.loadUserByUsername("alice");
@@ -64,7 +63,7 @@ public class UserDetailsCacheTest {
     }
 
     @Test
-    public void getCachedFalse() throws Exception {
+    void getCachedFalse() {
         UserDetailsCache cache = UserDetailsCache.get();
         assertNotNull(cache);
         UserDetails alice1 = cache.getCached("alice");
@@ -72,7 +71,7 @@ public class UserDetailsCacheTest {
     }
 
     @Test
-    public void getCachedTrueNotFound() throws Exception {
+    void getCachedTrueNotFound() {
 
         UserDetailsCache cache = UserDetailsCache.get();
         assertNotNull(cache);
@@ -81,7 +80,7 @@ public class UserDetailsCacheTest {
     }
 
     @Test
-    public void getCachedFalseNotFound() throws Exception {
+    void getCachedFalseNotFound() {
         UserDetailsCache cache = UserDetailsCache.get();
         assertNotNull(cache);
         UserDetails bob = cache.getCached("bob");
